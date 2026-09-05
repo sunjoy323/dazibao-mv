@@ -62,7 +62,15 @@ Align a lyrics text file to timings (SRT or whisper):
 ```bash
 dazibao-mv align --audio song.mp3 --lyrics lyrics.txt --out aligned.json
 dazibao-mv align --lyrics lyrics.txt --srt song.srt --out aligned.json
+dazibao-mv align --audio song.mp3 --lyrics lyrics.txt --out aligned.json \
+  --whisper-model medium --initial-prompt '歌名 作者' --max-line-sec 5.5
 ```
+
+Notes:
+- Writes `aligned.json` **and** a sibling `.srt` (same stem) for reproducible `--srt` renders.
+- Whisper defaults: model `medium`, **VAD off** (`vad_filter=False`), word timestamps on.
+- Overlong ASR blobs are soft-capped (~`--max-line-sec`, default `5.5`) so full-song align never keeps multi-dozen-second lyric lines.
+- Same `--whisper-model` / `--initial-prompt` / `--max-line-sec` flags are available on `render` when no `--srt` is given.
 
 ### `dazibao-mv render`
 

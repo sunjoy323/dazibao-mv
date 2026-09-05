@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 from . import __version__
-from .align import align, save_aligned
+from .align import align, save_aligned, save_srt
 from .render import render_mv
 from .styles import list_builtin_styles, load_style
 
@@ -31,9 +31,15 @@ def _cmd_align(args: argparse.Namespace) -> int:
         lyrics_path=args.lyrics,
         srt=args.srt,
         max_chars=args.max_chars,
+        whisper_model=args.whisper_model,
+        initial_prompt=args.initial_prompt,
+        max_line_sec=args.max_line_sec,
     )
     save_aligned(aligned, args.out)
+    srt_out = Path(args.out).with_suffix(".srt")
+    save_srt(aligned, srt_out)
     print(f"Wrote {len(aligned)} lines → {args.out}")
+    print(f"Wrote SRT → {srt_out}")
     return 0
 
 
@@ -45,6 +51,9 @@ def _cmd_render(args: argparse.Namespace) -> int:
         lyrics_path=args.lyrics,
         srt=args.srt,
         max_chars=args.max_chars,
+        whisper_model=getattr(args, "whisper_model", "medium"),
+        initial_prompt=getattr(args, "initial_prompt", None),
+        max_line_sec=getattr(args, "max_line_sec", 5.5),
     )
     # cache aligned next to out
     out_path = Path(args.out)
@@ -97,6 +106,9 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--out", required=True, help="Output aligned.json")
     ap.add_argument("--srt", default=None, help="Skip whisper; use this SRT")
     ap.add_argument("--max-chars", type=int, default=9)
+    ap.add_argument("--whisper-model", default="medium", help="faster-whisper model size")
+    ap.add_argument("--initial-prompt", default=None, help="Optional ASR prompt (song title/hooks)")
+    ap.add_argument("--max-line-sec", type=float, default=5.5, help="Cap single-line ASR span seconds")
     ap.set_defaults(func=_cmd_align)
 
     # render
@@ -115,6 +127,9 @@ def build_parser() -> argparse.ArgumentParser:
     rp.add_argument("--title-dur", type=float, default=2.0, help="Title duration seconds")
     rp.add_argument("--srt", default=None, help="SRT timings (skip whisper)")
     rp.add_argument("--max-chars", type=int, default=9)
+    rp.add_argument("--whisper-model", default="medium", help="faster-whisper model when no --srt")
+    rp.add_argument("--initial-prompt", default=None, help="Optional ASR prompt")
+    rp.add_argument("--max-line-sec", type=float, default=5.5, help="Cap single-line ASR span seconds")
     rp.add_argument("--lead", type=float, default=0.12, help="LEAD early punch (seconds)")
     rp.add_argument("--lite", action="store_true", help="Also write lite mp4")
     rp.add_argument("--width", type=int, default=1080)
