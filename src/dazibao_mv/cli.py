@@ -77,6 +77,8 @@ def _cmd_render(args: argparse.Namespace) -> int:
         title=args.title or "",
         author=args.author or "",
         title_dur=args.title_dur,
+        title_before_lyric=args.title_before_lyric,
+        title_fade=args.title_fade,
         lead=args.lead,
         max_chars=args.max_chars,
         lite=bool(args.lite),
@@ -124,7 +126,24 @@ def build_parser() -> argparse.ArgumentParser:
     rp.add_argument("--style-file", default=None, help="Custom style YAML")
     rp.add_argument("--title", default="", help="Title card text")
     rp.add_argument("--author", default="", help="Author on title card")
-    rp.add_argument("--title-dur", type=float, default=2.0, help="Title duration seconds")
+    rp.add_argument(
+        "--title-dur",
+        type=float,
+        default=None,
+        help="Title duration seconds (default: auto = first_lyric.t0 - title-before-lyric)",
+    )
+    rp.add_argument(
+        "--title-before-lyric",
+        type=float,
+        default=1.0,
+        help="Seconds before first lyric when auto title ends (default 1.0)",
+    )
+    rp.add_argument(
+        "--title-fade",
+        type=float,
+        default=0.8,
+        help="Title/author fade-out duration at end of title card (default 0.8)",
+    )
     rp.add_argument("--srt", default=None, help="SRT timings (skip whisper)")
     rp.add_argument("--max-chars", type=int, default=9)
     rp.add_argument("--whisper-model", default="medium", help="faster-whisper model when no --srt")

@@ -70,11 +70,14 @@ Notes:
 - Writes `aligned.json` **and** a sibling `.srt` (same stem) for reproducible `--srt` renders.
 - Whisper defaults: model `medium`, **VAD off** (`vad_filter=False`), word timestamps on.
 - Overlong ASR blobs are soft-capped (~`--max-line-sec`, default `5.5`) so full-song align never keeps multi-dozen-second lyric lines.
+- First lyric special-case: search early ASR cues for a strong text match after the intro; overlong early blobs (instrumental bleed) are **end-anchored** so on-screen text does not finish before vocals.
 - Same `--whisper-model` / `--initial-prompt` / `--max-line-sec` flags are available on `render` when no `--srt` is given.
 
 ### `dazibao-mv render`
 
 Render the full vertical MV:
+
+Title card (when `--title` is set) auto-lasts until **1 second before the first lyric**, then **fades out** (`--title-fade`, default 0.8s). Pass `--title-dur` only to override.
 
 ```bash
 dazibao-mv render \
@@ -126,7 +129,9 @@ Each style YAML defines `verse` / `chorus` / `hook` RGBA colors, `font`, `hook_k
 
 | Flag | Default | Meaning |
 |------|---------|---------|
-| `--title-dur` | `2.0` | Title card seconds |
+| `--title-dur` | auto | Title card seconds; omit for auto `first.t0 − title-before-lyric` |
+| `--title-before-lyric` | `1.0` | Auto title ends this many seconds before first lyric |
+| `--title-fade` | `0.8` | Title/author (and dark band) fade-out at end of title card |
 | `--max-chars` | `9` | Max chars per display line (orphan merge ≤ max+1) |
 | `--lead` | `0.12` | Early punch; clamped so clips **never overlap** |
 | `--lite` | off | Also write `*-lite.mp4` (~1600k video) |

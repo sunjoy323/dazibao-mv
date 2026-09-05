@@ -34,3 +34,32 @@ def test_split_asr_cues_on_punct():
     assert out[1]["text"] == "乙句"
     assert abs(out[0]["start"] - 0.0) < 1e-6
     assert abs(out[1]["end"] - 4.0) < 1e-6
+
+
+def test_first_lyric_end_anchors_overlong_early_blob():
+    """Whisper intro-bleed 12.34→20 must land near vocal end, not start-cap to 16.16."""
+    lyrics = ["霓虹把黑夜照得太红", "笑声从四面八方失控"]
+    cues = [
+        {"start": 2.38, "end": 3.66, "text": "人海孤岛"},
+        {"start": 12.34, "end": 20.0, "text": "霓虹把黑夜照得太红"},
+        {"start": 20.56, "end": 24.14, "text": "笑声从四面八方失控"},
+    ]
+    aligned = match_lyrics_to_cues(lyrics, cues, max_chars=9, max_line_sec=5.5)
+    assert aligned[0]["text"] == "霓虹把黑夜照得太红"
+    # end-anchored: start ≈ 20 - expected (~3.82) ≈ 16.18
+    assert 15.5 <= aligned[0]["start"] <= 18.0, aligned[0]
+    assert aligned[0]["end"] <= 20.05
+
+
+def test_first_lyric_prefers_strong_post_intro_cue():
+    """When a weak early cue and a strong ~17s cue both exist, lock to ~17s."""
+    lyrics = ["霓虹把黑夜照得太红", "笑声从四面八方失控"]
+    cues = [
+        {"start": 2.4, "end": 3.5, "text": "人海孤岛"},
+        {"start": 11.0, "end": 13.0, "text": "黑夜太红"},  # weak partial
+        {"start": 16.98, "end": 20.0, "text": "霓虹把黑夜照得太红。"},
+        {"start": 20.64, "end": 23.84, "text": "笑声从四面八方失控。"},
+    ]
+    aligned = match_lyrics_to_cues(lyrics, cues, max_chars=9, max_line_sec=5.5)
+    assert 16.5 <= aligned[0]["start"] <= 18.0, aligned[0]
+    assert aligned[0]["text"] == "霓虹把黑夜照得太红"

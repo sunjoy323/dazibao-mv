@@ -313,6 +313,54 @@ def _cleanup_frames(fdir: Path) -> None:
         pass
 
 
+def _scale_rgba(color: Tuple[int, ...], alpha_scale: float) -> Tuple[int, ...]:
+    """Scale an RGB or RGBA color's alpha (default 255 if RGB)."""
+    if len(color) == 4:
+        r, g, b, a = color
+    else:
+        r, g, b = color[:3]
+        a = 255
+    return (r, g, b, max(0, min(255, int(round(a * alpha_scale)))))
+
+
+def title_fade_alpha(frame_index: int, frames: int, fade_dur: float, fps: int) -> float:
+    """Opacity 1→0 over the last fade_dur seconds (linear). Full opacity before fade."""
+    if frames <= 1 or fade_dur <= 0:
+        return 1.0
+    fade_frames = max(1, int(round(fade_dur * fps)))
+    fade_start = max(0, frames - fade_frames)
+    if frame_index < fade_start:
+        return 1.0
+    # linear 1→0 across fade window (last frame ~0)
+    t = (frame_index - fade_start) / max(1, fade_frames - 1) if fade_frames > 1 else 1.0
+    return max(0.0, min(1.0, 1.0 - t))
+
+
+def compute_title_dur(
+    lines: Sequence[Any],
+    *,
+    title_dur: Optional[float] = None,
+    title_before_lyric: float = 1.0,
+    min_title: float = 0.8,
+) -> float:
+    """Auto title duration: first_line.t0 - title_before_lyric (floored at min_title).
+
+    Explicit title_dur overrides auto. Returns 0 if no lines / no usable t0.
+    """
+    if title_dur is not None:
+        return float(title_dur)
+    if not lines:
+        return max(min_title, 2.0)
+    first = lines[0]
+    if hasattr(first, "t0"):
+        first_t0 = float(first.t0)
+    elif isinstance(first, dict):
+        first_t0 = float(first.get("t0", first.get("start", 0.0)))
+    else:
+        first_t0 = 0.0
+    return max(min_title, first_t0 - title_before_lyric)
+
+
 def build_title_clip(
     bg_im: Image.Image,
     clips_dir: Path,
@@ -324,9 +372,11 @@ def build_title_clip(
     width: int,
     height: int,
     fps: int,
+    fade_dur: float = 0.8,
 ) -> Path:
     W, H = width, height
     frames = max(4, int(round(title_dur * fps)))
+    fade_dur = max(0.0, min(float(fade_dur), max(0.0, title_dur - 0.05)))
     fdir = clips_dir / "f_title"
     fdir.mkdir(parents=True, exist_ok=True)
     font_path = resolve_font(style.get("font"))
@@ -338,23 +388,35 @@ def build_title_clip(
     verse_accent = color_tuple(style, "verse", "accent")
 
     for fi in range(frames):
+        alpha = title_fade_alpha(fi, frames, fade_dur, fps)
         canvas = bg_im.copy().convert("RGBA")
         overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
         draw = ImageDraw.Draw(overlay)
-        draw.rectangle([0, int(H * 0.32), W, int(H * 0.68)], fill=(8, 6, 5, 140))
+        band_a = int(round(140 * alpha))
+        draw.rectangle([0, int(H * 0.32), W, int(H * 0.68)], fill=(8, 6, 5, band_a))
         f1, bb1 = fit_font_size(draw, title or " ", font_path, 150, W - 100)
         tw, th = bb1[2] - bb1[0], bb1[3] - bb1[1]
         x = (W - tw) // 2
         y = int(H * 0.40) - bb1[1]
-        if title:
-            layered_text(draw, (x, y), title, f1, hook_fill, hook_shadow, hook_accent, True)
-        if author:
+        if title and alpha > 0.01:
+            layered_text(
+                draw, (x, y), title, f1,
+                _scale_rgba(hook_fill, alpha),
+                _scale_rgba(hook_shadow, alpha),
+                _scale_rgba(hook_accent, alpha),
+                True,
+            )
+        if author and alpha > 0.01:
             f2, bb2 = fit_font_size(draw, author, font_path, 72, W - 160)
             tw2 = bb2[2] - bb2[0]
             x2 = (W - tw2) // 2
             y2 = y + th + 48
             layered_text(
-                draw, (x2, y2 - bb2[1]), author, f2, verse_fill, verse_shadow, verse_accent, False
+                draw, (x2, y2 - bb2[1]), author, f2,
+                _scale_rgba(verse_fill, alpha),
+                _scale_rgba(verse_shadow, alpha),
+                _scale_rgba(verse_accent, alpha),
+                False,
             )
         Image.alpha_composite(canvas, overlay).convert("RGB").save(
             fdir / f"{fi:04d}.jpg", quality=88
@@ -474,7 +536,10 @@ def render_mv(
     bg_config: Optional[str] = None,
     title: str = "",
     author: str = "",
-    title_dur: float = 2.0,
+    title_dur: Optional[float] = None,
+    title_before_lyric: float = 1.0,
+    title_fade: float = 0.8,
+    min_title: float = 0.8,
     lead: float = 0.12,
     max_chars: int = 9,
     lite: bool = False,
@@ -507,6 +572,21 @@ def render_mv(
         aligned, style, lead=lead, audio_dur=audio_dur, max_chars=max_chars
     )
 
+    # Auto title: hold until title_before_lyric seconds before first lyric.
+    effective_title_dur = 0.0
+    if title:
+        effective_title_dur = compute_title_dur(
+            lines,
+            title_dur=title_dur,
+            title_before_lyric=title_before_lyric,
+            min_title=min_title,
+        )
+        print(
+            f"title_dur={effective_title_dur:.3f}s fade={title_fade:.3f}s "
+            f"(before_lyric={title_before_lyric})",
+            flush=True,
+        )
+
     line_paths: List[Path] = []
     for i, line in enumerate(lines):
         print(f"[{i+1}/{len(lines)}] {line.t0:.1f}-{line.t1:.1f} {line.text}", flush=True)
@@ -517,16 +597,17 @@ def render_mv(
         )
 
     parts_meta = build_concat_list(
-        lines, title_dur=title_dur if title else 0.0, audio_dur=audio_dur, fps=fps
+        lines, title_dur=effective_title_dur, audio_dur=audio_dur, fps=fps
     )
 
     parts: List[Path] = []
     title_path = None
-    if title:
+    if title and effective_title_dur > 0:
         title_path = build_title_clip(
             bg_im, clips,
             title=title, author=author or "", style=style,
-            title_dur=title_dur, width=width, height=height, fps=fps,
+            title_dur=effective_title_dur, width=width, height=height, fps=fps,
+            fade_dur=title_fade,
         )
 
     for pi, part in enumerate(parts_meta):

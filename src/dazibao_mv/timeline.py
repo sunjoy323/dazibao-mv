@@ -157,9 +157,10 @@ def build_concat_list(
 ) -> List[ConcatPart]:
     """Build ordered concat parts: title, then gaps + lines, then end gap.
 
-    Absolute lyric clock starts at 0 (title occupies [0, title_dur] visually
-    but lyric t0/t1 are on the audio clock; title is prepended then lyric
-    timeline follows audio times).
+    Title and lyrics share the same audio clock: title occupies [0, title_dur],
+    then a gap is inserted when first_line.t0 > title_dur (typically ~1s when
+    auto title_dur = first.t0 - 1). Lyric t0/t1 stay absolute audio times —
+    never shift them to compensate for the title.
     """
     parts: List[ConcatPart] = []
     if title_dur > 0:

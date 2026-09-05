@@ -59,15 +59,78 @@ def expected_line_dur(text: str, *, max_sec: float = 5.5) -> float:
     return max(0.9, min(max_sec, n * 0.38 + 0.4))
 
 
-def cap_span(start: float, end: float, text: str, *, max_sec: float = 5.5) -> Tuple[float, float]:
-    """Clamp an ASR span so one display line cannot swallow half a verse."""
+def cap_span(
+    start: float,
+    end: float,
+    text: str,
+    *,
+    max_sec: float = 5.5,
+    anchor: str = "start",
+) -> Tuple[float, float]:
+    """Clamp an ASR span so one display line cannot swallow half a verse.
+
+    anchor="start" keeps the ASR start and shortens the end (default).
+    anchor="end" keeps the ASR end and pulls start forward — useful when
+    Whisper bleeds instrumental intro into the first lyric cue.
+    """
     dur = end - start
     expect = expected_line_dur(text, max_sec=max_sec)
     if dur > expect + 0.8:
-        end = start + expect
+        if anchor == "end":
+            start = max(0.0, end - expect)
+        else:
+            end = start + expect
     if end <= start:
         end = start + 0.4
     return start, end
+
+
+def _cue_similarity(lyric_norm: str, cue_text: str) -> float:
+    """Fuzzy similarity between a normalized lyric and an ASR cue."""
+    nc = _normalize(cue_text)
+    if not lyric_norm or not nc:
+        return 0.0
+    r = SequenceMatcher(None, lyric_norm, nc).ratio()
+    if abs(len(nc) - len(lyric_norm)) <= max(4, len(lyric_norm) // 3):
+        r += 0.05
+    if lyric_norm in nc or nc in lyric_norm:
+        len_ratio = min(len(lyric_norm), len(nc)) / max(len(lyric_norm), len(nc))
+        r = max(r, 0.55 + 0.4 * len_ratio)
+    return r
+
+
+def _pick_first_lyric_cue(
+    nt: str,
+    cues: Sequence[Dict[str, Any]],
+    *,
+    min_ratio: float = 0.5,
+    intro_floor: float = 8.0,
+    search_until: float = 45.0,
+) -> Optional[int]:
+    """Pick ASR index for the first lyric — prefer strong matches after intro bleed.
+
+    Whisper often attaches the first sung line to an early instrumental blob
+    (e.g. start=12s) while a cleaner cue exists near the real vocal onset (~17s),
+    or a single overlong blob covers intro→lyric. We search all early cues and
+    prefer high-similarity hits; among strong hits, prefer those at/after
+    intro_floor when available.
+    """
+    candidates: List[Tuple[float, int, float]] = []  # (ratio, index, start)
+    for j, c in enumerate(cues):
+        st = float(c["start"])
+        if st > search_until:
+            break
+        r = _cue_similarity(nt, c.get("text") or "")
+        if r >= min_ratio:
+            candidates.append((r, j, st))
+    if not candidates:
+        return None
+    # Highest similarity first; tie-break by preferring post-intro starts, then earlier.
+    strong = [c for c in candidates if c[0] >= min_ratio]
+    post = [c for c in strong if c[2] >= intro_floor]
+    pool = post if post else strong
+    pool.sort(key=lambda x: (-x[0], x[2]))
+    return pool[0][1]
 
 
 def split_asr_cues(cues: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -124,6 +187,7 @@ def match_lyrics_to_cues(
     aligned: List[Dict[str, Any]] = []
     cursor = 0.0
     ai = 0  # sequential ASR pointer
+    first_lyric_done = False
 
     for raw in lyrics:
         raw = raw.strip()
@@ -131,25 +195,43 @@ def match_lyrics_to_cues(
             continue
         nt = _normalize(raw)
         best_j, best_r = None, -1.0
-        if cues:
+        anchor = "start"
+
+        if cues and not first_lyric_done:
+            # First lyric: search all early cues; lock to strong post-intro match.
+            fj = _pick_first_lyric_cue(nt, cues)
+            if fj is not None:
+                best_j = fj
+                best_r = _cue_similarity(nt, cues[fj].get("text") or "")
+                # Overlong early blobs (intro bleed) → anchor to cue end near vocals.
+                st = float(cues[fj]["start"])
+                en = float(cues[fj]["end"])
+                expect = expected_line_dur(raw, max_sec=max_line_sec)
+                if (en - st) > expect + 0.8 and st < 15.0:
+                    anchor = "end"
+            else:
+                # fall back to normal window search from ai
+                for j in range(ai, min(ai + 8, len(cues))):
+                    r = _cue_similarity(nt, cues[j].get("text") or "")
+                    if r > best_r:
+                        best_r, best_j = r, j
+                if best_j is not None:
+                    st = float(cues[best_j]["start"])
+                    en = float(cues[best_j]["end"])
+                    expect = expected_line_dur(raw, max_sec=max_line_sec)
+                    if (en - st) > expect + 0.8 and st < 15.0:
+                        anchor = "end"
+            first_lyric_done = True
+        elif cues:
             for j in range(ai, min(ai + 8, len(cues))):
-                nc = _normalize(cues[j]["text"])
-                if not nc:
-                    continue
-                r = SequenceMatcher(None, nt, nc).ratio()
-                if abs(len(nc) - len(nt)) <= max(4, len(nt) // 3):
-                    r += 0.05
-                # mild substring bonus scaled by length ratio (NOT flat 0.85)
-                if nt and nc and (nt in nc or nc in nt):
-                    len_ratio = min(len(nt), len(nc)) / max(len(nt), len(nc))
-                    r = max(r, 0.55 + 0.4 * len_ratio)
+                r = _cue_similarity(nt, cues[j].get("text") or "")
                 if r > best_r:
                     best_r, best_j = r, j
 
         if best_j is not None and best_r >= 0.32:
             start = float(cues[best_j]["start"])
             end = float(cues[best_j]["end"])
-            start, end = cap_span(start, end, raw, max_sec=max_line_sec)
+            start, end = cap_span(start, end, raw, max_sec=max_line_sec, anchor=anchor)
             ai = best_j + 1
             cursor = end
         else:
