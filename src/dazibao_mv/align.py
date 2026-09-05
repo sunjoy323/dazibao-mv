@@ -133,13 +133,37 @@ def _pick_first_lyric_cue(
     return pool[0][1]
 
 
+def _asr_phrase_parts(text: str) -> List[str]:
+    """Split an ASR cue into phrase parts on punctuation and whitespace.
+
+    Whisper often emits space-separated CJK clauses without punctuation
+    (e.g. ``八零后的老灯 八零后的老灯``). Splitting those keeps sequential
+    lyric matching from consuming a whole repeated chorus in one step.
+    """
+    text = (text or "").strip()
+    if not text:
+        return []
+    parts: List[str] = []
+    for punct_part in _PUNCT_SPLIT.split(text):
+        punct_part = punct_part.strip()
+        if not punct_part:
+            continue
+        space_bits = [b.strip() for b in re.split(r"\s+", punct_part) if b.strip()]
+        # Keep short heads (e.g. 「二十岁 想去…」) glued; still split chorus repeats.
+        if len(space_bits) > 1 and all(len(_normalize(b)) >= 4 for b in space_bits):
+            parts.extend(space_bits)
+        else:
+            parts.append(punct_part)
+    return parts
+
+
 def split_asr_cues(cues: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Split long ASR segments on punctuation, proportionally by char weight."""
+    """Split long ASR segments on punctuation/whitespace, by char weight."""
     out: List[Dict[str, Any]] = []
     for c in cues:
         text = (c.get("text") or "").strip()
         start, end = float(c["start"]), float(c["end"])
-        parts = [p.strip() for p in _PUNCT_SPLIT.split(text) if p.strip()]
+        parts = _asr_phrase_parts(text)
         if len(parts) <= 1:
             item = {"start": start, "end": end, "text": text}
             if c.get("words"):
@@ -211,6 +235,48 @@ def first_lyric_onset_from_words(
         return None
     return onset
 
+
+def _pick_sequential_cue(
+    nt: str,
+    cues: Sequence[Dict[str, Any]],
+    ai: int,
+    *,
+    cursor: float = 0.0,
+    window: int = 16,
+    min_ratio: float = 0.32,
+    max_ahead: float = 20.0,
+) -> Tuple[Optional[int], float]:
+    """Return (index, ratio) for the next lyric — earliest acceptable match.
+
+    Scoring the whole window and taking the max lets identical chorus lines
+    skip forward to a later identical occurrence (e.g. chorus 3) while bridge
+    cues in between are never claimed. Greedy earliest-above-threshold keeps
+    the pointer monotonic with the song.
+
+    ``max_ahead`` further refuses matches whose cue start is too far past the
+    current cursor, so an extra repeated lyric (ASR merged two lines) falls
+    back to a short synthetic span instead of leaping over the bridge.
+    """
+    end = min(ai + window, len(cues))
+    best_j: Optional[int] = None
+    best_r = -1.0
+    horizon = cursor + max_ahead
+    for j in range(ai, end):
+        st = float(cues[j]["start"])
+        if st > horizon and cursor > 1.0:
+            # Too far ahead of where we are in the song — stop scanning.
+            break
+        r = _cue_similarity(nt, cues[j].get("text") or "")
+        if r >= min_ratio:
+            return j, r
+        if r > best_r:
+            best_r, best_j = r, j
+    # If the only candidate was beyond horizon, treat as no match.
+    if best_j is not None and float(cues[best_j]["start"]) > horizon and cursor > 1.0:
+        return None, -1.0
+    return best_j, best_r
+
+
 def match_lyrics_to_cues(
     lyrics: Sequence[str],
     cues: Sequence[Dict[str, Any]],
@@ -265,10 +331,10 @@ def match_lyrics_to_cues(
                         anchor = "end"
             first_lyric_done = True
         elif cues:
-            for j in range(ai, min(ai + 8, len(cues))):
-                r = _cue_similarity(nt, cues[j].get("text") or "")
-                if r > best_r:
-                    best_r, best_j = r, j
+            # Prefer the earliest cue above threshold so repeated chorus
+            # lines cannot jump ahead to a later identical occurrence and
+            # orphan the bridge that sits between them in the ASR stream.
+            best_j, best_r = _pick_sequential_cue(nt, cues, ai, cursor=cursor, window=16, max_ahead=20.0)
 
         if best_j is not None and best_r >= 0.32:
             start = float(cues[best_j]["start"])

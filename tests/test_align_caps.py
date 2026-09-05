@@ -90,3 +90,55 @@ def test_first_lyric_word_onset_skips_intro_bleed():
     aligned = match_lyrics_to_cues(lyrics, cues, max_chars=9, max_line_sec=5.5)
     assert 16.5 <= aligned[0]["start"] <= 18.0, aligned[0]
     assert abs(aligned[0]["start"] - 17.74) < 0.05
+
+
+def test_split_asr_cues_on_whitespace():
+    cues = [{"start": 0.0, "end": 4.0, "text": "八零后的老灯 八零后的老灯"}]
+    out = split_asr_cues(cues)
+    assert len(out) == 2
+    assert out[0]["text"] == "八零后的老灯"
+    assert out[1]["text"] == "八零后的老灯"
+    assert abs(out[0]["end"] - 2.0) < 1e-6
+
+
+def test_repeated_chorus_does_not_skip_bridge():
+    """Identical chorus lines must not jump to a later chorus over the bridge."""
+    # Closing bar is one 老登 + 硬骨头; an extra lyric 老登 must not leap to chorus 3.
+    lyrics = [
+        "八零后的老登",
+        "硬骨头敬此生",
+        "二十岁想去仗剑天涯",
+        "四十岁守着一锅热汤",
+        "八零后的老登",
+        "八零后的老登",
+    ]
+    cues = [
+        {"start": 230.0, "end": 238.0, "text": "八零后的老灯 引骨头进此生"},
+        {"start": 238.5, "end": 242.0, "text": "二十岁想去掌剑天涯"},
+        {"start": 242.0, "end": 245.0, "text": "四十岁受着一锅热汤"},
+        {"start": 262.0, "end": 266.0, "text": "八零后的老灯 八零后的老灯"},
+    ]
+    aligned = match_lyrics_to_cues(lyrics, cues, max_chars=12, max_line_sec=5.5)
+    bridge = [a for a in aligned if a["text"] == "二十岁想去仗剑天涯"][0]
+    assert bridge["start"] < 250.0, bridge
+    assert [a for a in aligned if a["text"] == "四十岁守着一锅热汤"][0]["start"] < 255.0
+    last_pair = [a for a in aligned if a["text"] == "八零后的老登"]
+    assert last_pair[-1]["start"] >= 260.0, last_pair
+
+
+def test_extra_repeated_lyric_synthesizes_instead_of_jumping():
+    """If lyrics has an extra chorus repeat, synthesize — do not skip bridge."""
+    lyrics = [
+        "八零后的老登",
+        "八零后的老登",  # extra vs ASR closing bar
+        "硬骨头敬此生",
+        "二十岁想去仗剑天涯",
+    ]
+    cues = [
+        {"start": 230.0, "end": 238.0, "text": "八零后的老灯 引骨头进此生"},
+        {"start": 238.5, "end": 242.0, "text": "二十岁想去掌剑天涯"},
+        {"start": 262.0, "end": 266.0, "text": "八零后的老灯 八零后的老灯"},
+    ]
+    aligned = match_lyrics_to_cues(lyrics, cues, max_chars=12, max_line_sec=5.5)
+    bridge = [a for a in aligned if a["text"] == "二十岁想去仗剑天涯"][0]
+    assert bridge["start"] < 250.0, bridge
