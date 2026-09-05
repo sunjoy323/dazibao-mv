@@ -806,6 +806,158 @@ def _gap_clip(
     return dst
 
 
+def _hold_line_clip(
+    idx: int,
+    line: TimedLine,
+    bg_im: Image.Image,
+    clips_dir: Path,
+    style: Dict[str, Any],
+    gap: float,
+    *,
+    width: int,
+    height: int,
+    fps: int,
+    dst: Optional[Path] = None,
+) -> Path:
+    """Hold previous lyric fully settled (all glyphs, no punch) for `gap` seconds."""
+    dur = max(1.0 / fps, float(gap))
+    frames = max(1, int(round(dur * fps)))
+    out = dst or (clips_dir / f"hold_line_{idx:03d}.mp4")
+    fdir = clips_dir / f"fh_line_{idx:03d}_{out.stem}"
+    fdir.mkdir(parents=True, exist_ok=True)
+
+    poster = is_poster_fill(style)
+    palette = palette_for(style, idx) if poster else None
+    if poster and palette is not None:
+        bg_rgb = tuple(palette.get("bg", (10, 10, 10)))
+        line_bg = Image.new("RGB", (width, height), bg_rgb)
+    else:
+        line_bg = bg_im
+
+    chunks = list(line.chunks) if line.chunks else (glyph_chunks(line.text) or [line.text])
+    # t_local large → punch scale settles to 1.0
+    im = draw_layout(
+        line_bg,
+        chunks,
+        line.text,
+        line.layout,
+        t_local=10.0,
+        style=style,
+        chorus=line.chorus,
+        hook=line.hook,
+        width=width,
+        height=height,
+        palette=palette,
+        line_index=idx,
+        decor=bool(poster and style.get("decor", True)),
+    )
+    for fi in range(frames):
+        im.save(fdir / f"{fi:04d}.jpg", quality=88)
+
+    _encode_frames(fdir, out, fps, dur)
+    _cleanup_frames(fdir)
+    return out
+
+
+def _hold_title_clip(
+    bg_im: Image.Image,
+    clips_dir: Path,
+    *,
+    title: str,
+    author: str,
+    style: Dict[str, Any],
+    gap: float,
+    width: int,
+    height: int,
+    fps: int,
+    dst: Optional[Path] = None,
+) -> Path:
+    """Hold title card at full opacity (no fade) for the post-title gap."""
+    dur = max(1.0 / fps, float(gap))
+    frames = max(1, int(round(dur * fps)))
+    out = dst or (clips_dir / "hold_title.mp4")
+    fdir = clips_dir / f"fh_title_{out.stem}"
+    fdir.mkdir(parents=True, exist_ok=True)
+    font_path = resolve_font(style.get("font"))
+    poster = is_poster_fill(style)
+    title_pal = None
+    if poster:
+        pals = style.get("palettes") or []
+        title_pal = pals[1] if len(pals) > 1 else palette_for(style, 1)
+    hook_fill = color_tuple(style, "hook", "fill")
+    hook_shadow = color_tuple(style, "hook", "shadow")
+    hook_accent = color_tuple(style, "hook", "accent")
+    verse_fill = color_tuple(style, "verse", "fill")
+    verse_shadow = color_tuple(style, "verse", "shadow")
+    verse_accent = color_tuple(style, "verse", "accent")
+    shadow_off = tuple(style.get("shadow_offset") or (18, 18))
+    W, H = width, height
+    alpha = 1.0
+
+    if poster and title_pal is not None:
+        bg_rgb = tuple(title_pal.get("bg", (242, 232, 216)))
+        canvas = Image.new("RGBA", (W, H), _rgba(bg_rgb, 255))
+    else:
+        canvas = bg_im.copy().convert("RGBA")
+    overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+
+    if poster and title_pal is not None and style.get("decor", True):
+        draw_poster_decor(
+            draw, overlay, W, H, title_pal,
+            line_index=0,
+            font_path=font_path,
+            with_stars=True,
+            alpha=alpha,
+        )
+        fill = _rgba(title_pal.get("fill", (196, 30, 58)), 255)
+        shadow = _rgba(title_pal.get("shadow", (17, 17, 17)), 255)
+        author_fill = fill
+        author_shadow = shadow
+    else:
+        draw.rectangle([0, int(H * 0.32), W, int(H * 0.68)], fill=(8, 6, 5, 140))
+        fill = hook_fill
+        shadow = hook_shadow
+        author_fill = verse_fill
+        author_shadow = verse_shadow
+
+    f1, bb1 = fit_font_size(draw, title or " ", font_path, 150, W - 100)
+    if poster and title:
+        f1, bb1 = _fit_poster_h_font(draw, title, font_path, W, H, shadow_off, target_w_frac=0.86)
+    tw, th = bb1[2] - bb1[0], bb1[3] - bb1[1]
+    x = (W - tw - (shadow_off[0] if poster else 0)) // 2
+    y = int(H * (0.36 if poster else 0.40)) - bb1[1]
+    if title:
+        if poster:
+            hard_block_shadow_text(
+                draw, (x, y), title, f1, fill, shadow, offset=shadow_off, is_new=False
+            )
+        else:
+            layered_text(draw, (x, y), title, f1, fill, shadow, hook_accent, False)
+    if author:
+        f2, bb2 = fit_font_size(draw, author, font_path, 72, W - 160)
+        tw2 = bb2[2] - bb2[0]
+        x2 = (W - tw2) // 2
+        y2 = y + th + 48
+        if poster:
+            hard_block_shadow_text(
+                draw, (x2, y2 - bb2[1]), author, f2,
+                author_fill, author_shadow, offset=(8, 8), is_new=False,
+            )
+        else:
+            layered_text(
+                draw, (x2, y2 - bb2[1]), author, f2,
+                author_fill, author_shadow, verse_accent, False,
+            )
+    frame = Image.alpha_composite(canvas, overlay).convert("RGB")
+    for fi in range(frames):
+        frame.save(fdir / f"{fi:04d}.jpg", quality=88)
+
+    _encode_frames(fdir, out, fps, dur)
+    _cleanup_frames(fdir)
+    return out
+
+
 def prepare_lines(
     aligned: Sequence[Dict[str, Any]],
     style: Dict[str, Any],
@@ -860,6 +1012,7 @@ def render_mv(
     width: int = 1080,
     height: int = 1920,
     fps: int = 24,
+    gap_mode: str = "hold",
 ) -> Path:
     """Full render pipeline → final mp4 at `out`."""
     _require_ffmpeg()
@@ -936,19 +1089,63 @@ def render_mv(
             fade_dur=title_fade,
         )
 
+    gap_mode = (gap_mode or "hold").lower().strip()
+    if gap_mode not in ("hold", "black"):
+        raise ValueError(f"gap_mode must be 'hold' or 'black', got {gap_mode!r}")
+
+    # Track previous visual for hold gaps (title or last lyric line index)
+    prev_visual: Optional[str] = None  # "title" | "line"
+    prev_line_index: Optional[int] = None
+
     for pi, part in enumerate(parts_meta):
         if part.kind == "title":
             assert title_path is not None
             parts.append(title_path)
+            prev_visual = "title"
+            prev_line_index = None
         elif part.kind == "gap":
             gap = part.t1 - part.t0
             gpath = clips / f"gap_{pi:03d}.mp4"
-            parts.append(
-                _gap_clip(bg_jpg, gpath, gap, width=width, height=height, fps=fps)
-            )
+            if gap_mode == "hold" and prev_visual == "line" and prev_line_index is not None:
+                parts.append(
+                    _hold_line_clip(
+                        prev_line_index,
+                        lines[prev_line_index],
+                        bg_im,
+                        clips,
+                        style,
+                        gap,
+                        width=width,
+                        height=height,
+                        fps=fps,
+                        dst=gpath,
+                    )
+                )
+            elif gap_mode == "hold" and prev_visual == "title" and title:
+                parts.append(
+                    _hold_title_clip(
+                        bg_im,
+                        clips,
+                        title=title,
+                        author=author or "",
+                        style=style,
+                        gap=gap,
+                        width=width,
+                        height=height,
+                        fps=fps,
+                        dst=gpath,
+                    )
+                )
+            else:
+                # black / matte fallback (no previous visual, or gap_mode=black)
+                parts.append(
+                    _gap_clip(bg_jpg, gpath, gap, width=width, height=height, fps=fps)
+                )
         elif part.kind == "line":
             assert part.line_index is not None
             parts.append(line_paths[part.line_index])
+            prev_visual = "line"
+            prev_line_index = part.line_index
 
     lst = clips / "list.txt"
     with open(lst, "w", encoding="utf-8") as f:

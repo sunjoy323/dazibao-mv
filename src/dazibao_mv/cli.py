@@ -85,6 +85,7 @@ def _cmd_render(args: argparse.Namespace) -> int:
         width=args.width,
         height=args.height,
         fps=args.fps,
+        gap_mode=args.gap_mode,
     )
     return 0
 
@@ -154,6 +155,12 @@ def build_parser() -> argparse.ArgumentParser:
     rp.add_argument("--width", type=int, default=1080)
     rp.add_argument("--height", type=int, default=1920)
     rp.add_argument("--fps", type=int, default=24)
+    rp.add_argument(
+        "--gap-mode",
+        choices=("hold", "black"),
+        default="hold",
+        help="Inter-lyric gaps: hold previous lyric/title (default) or solid black matte",
+    )
     rp.set_defaults(func=_cmd_render)
 
     return p

@@ -78,7 +78,7 @@ Notes:
 
 Render the full vertical MV:
 
-Title card (when `--title` is set) auto-lasts until **1 second before the first lyric**, then **fades out** (`--title-fade`, default 0.8s). Pass `--title-dur` only to override.
+Title card (when `--title` is set) auto-lasts until **1 second before the first lyric**, then **fades out** (`--title-fade`, default 0.8s). Pass `--title-dur` only to override. Gaps between clips **hold the previous visual** by default (`--gap-mode hold`); `--gap-mode black` restores solid matte gaps.
 
 ```bash
 dazibao-mv render \
@@ -117,7 +117,7 @@ Builtins:
 1. **dazibao-ivory** — ivory type, teal-gray shadow, crimson hook smash
 2. **laodeng-brick** — warm gold type, brick-red smash
 3. **mono-poster** — stark B/W; white bars / inverted hook
-4. **poster-wall** — dazibao poster-fill: glyphs auto-fit to fill the screen (horizontal or vertical), **hard block shadow** (not soft chromatic layers), double border + rules + stamp「大字报」, and **alternating solid palettes** per line (black/cream/crimson). `--bg-color` / `--bg` / `--bg-generate` are ignored; palettes win. Gaps use matte black.
+4. **poster-wall** — dazibao poster-fill: glyphs auto-fit to fill the screen (horizontal or vertical), **hard block shadow** (not soft chromatic layers), double border + rules + stamp「大字报」, and **alternating solid palettes** per line (black/cream/crimson). `--bg-color` / `--bg` / `--bg-generate` are ignored; palettes win. Inter-lyric gaps **hold the previous lyric/title** (not black); use `--gap-mode black` for the old matte.
 
 Custom:
 
