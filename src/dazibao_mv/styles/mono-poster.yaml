@@ -1,25 +1,20 @@
 name: mono-poster
-description: White/black high contrast poster
+description: Stark B/W poster — white glyphs in solid black bars (no color accent)
 font: /usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc
 verse:
-  fill: [245, 245, 245, 255]
+  fill: [255, 255, 255, 255]
   shadow: [0, 0, 0, 255]
-  accent: [180, 180, 180, 200]
-  box: [0, 0, 0, 180]
+  accent: [0, 0, 0, 0]
+  box: [0, 0, 0, 220]
 chorus:
   fill: [255, 255, 255, 255]
   shadow: [0, 0, 0, 255]
-  accent: [220, 220, 220, 220]
-  box: [0, 0, 0, 200]
+  accent: [0, 0, 0, 0]
+  box: [0, 0, 0, 235]
 hook:
-  fill: [255, 255, 255, 255]
-  shadow: [0, 0, 0, 255]
-  accent: [255, 255, 255, 120]
-  box: [0, 0, 0, 230]
-hook_keywords:
-  - 后海不是海
-  - 八零后的老登
-chorus_keywords:
-  - 后海不是海
-  - 八零后的老登
-  - 硬骨头
+  fill: [0, 0, 0, 255]
+  shadow: [255, 255, 255, 80]
+  accent: [0, 0, 0, 0]
+  box: [255, 255, 255, 245]
+hook_keywords: [后海不是海, 八零后的老登, 越热闹越寂寞]
+chorus_keywords: [后海不是海, 八零后的老登, 越热闹, 越寂寞, 人潮汹涌]

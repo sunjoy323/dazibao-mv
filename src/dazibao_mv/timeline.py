@@ -130,9 +130,9 @@ def assign_chunk_times(
     """Distribute reveal times within each clamped [t0, t1]."""
     for L in lines:
         if not L.chunks:
-            from .split import split_line
+            from .split import glyph_chunks
 
-            L.chunks = split_line(L.text) or [L.text]
+            L.chunks = glyph_chunks(L.text) or [L.text]
         n = max(1, len(L.chunks))
         dur = max(0.2, L.t1 - L.t0)
         reveal_dur = min(dur * reveal_frac, n * max_per_char)

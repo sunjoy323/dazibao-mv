@@ -105,3 +105,27 @@ def load_lyrics_file(path: str) -> List[str]:
     """Load non-empty lyric lines from a text file."""
     with open(path, "r", encoding="utf-8") as f:
         return [ln.strip() for ln in f if ln.strip() and not ln.strip().startswith("#")]
+
+
+def glyph_chunks(text: str) -> List[str]:
+    """Kinetic reveal units: per-character (short) or 1–2 glyph groups (long).
+
+    This is NOT line-breaking (`split_line`). Used so each punch reveals one
+    glyph/word-piece, matching the approved dazibao MV behaviour.
+    """
+    text = _clean(text)
+    if not text:
+        return []
+    if len(text) <= 6:
+        return list(text)
+    chunks: List[str] = []
+    i = 0
+    while i < len(text):
+        # first glyph alone; prefer pairs later; leave last 1–2 intact
+        if i == 0 or len(text) - i <= 2:
+            n = 1
+        else:
+            n = 2 if (i % 3) else 1
+        chunks.append(text[i : i + n])
+        i += n
+    return chunks

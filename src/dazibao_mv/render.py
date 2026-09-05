@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from PIL import Image, ImageDraw, ImageFont
 
 from .bg import prepare_background
-from .split import split_line
+from .split import glyph_chunks, split_line
 from .styles import classify_line, color_tuple, load_style, resolve_font
 from .timeline import (
     LAYOUTS,
@@ -181,7 +181,18 @@ def draw_layout(
 
     elif layout == "left_stack":
         base_size = 195 if len(shown) <= 5 else 148
-        y = 290
+        while base_size >= 40:
+            total_h = 0
+            max_w = 0
+            for i, ch in enumerate(chunks_visible):
+                f = font_for(i, base_size)
+                bb = draw.textbbox((0, 0), ch, font=f)
+                total_h += (bb[3] - bb[1]) + 12
+                max_w = max(max_w, bb[2] - bb[0] + 40)
+            if total_h <= H - 200 and max_w <= W - 80:
+                break
+            base_size -= 8
+        y = 200
         for i, ch in enumerate(chunks_visible):
             f = font_for(i, base_size)
             bb = draw.textbbox((0, 0), ch, font=f)
@@ -251,15 +262,21 @@ def draw_layout(
             x += tw + 8
 
     else:  # center_slam
-        base_size = 200 if len(shown) <= 6 else 145
-        fonts_bbs = []
-        total_h = 0
-        for i, ch in enumerate(chunks_visible):
-            f = font_for(i, base_size)
-            bb = draw.textbbox((0, 0), ch, font=f)
-            fonts_bbs.append((ch, f, bb))
-            total_h += (bb[3] - bb[1]) + 12
-        y = (H - total_h) // 2
+        base_size = 220 if len(shown) <= 4 else (180 if len(shown) <= 8 else 140)
+        while base_size >= 40:
+            fonts_bbs = []
+            total_h = 0
+            max_w = 0
+            for i, ch in enumerate(chunks_visible):
+                f = font_for(i, base_size)
+                bb = draw.textbbox((0, 0), ch, font=f)
+                fonts_bbs.append((ch, f, bb))
+                total_h += (bb[3] - bb[1]) + 12
+                max_w = max(max_w, bb[2] - bb[0] + 44)
+            if total_h <= H - 160 and max_w <= W - 48:
+                break
+            base_size -= 8
+        y = max(80, (H - total_h) // 2)
         for i, (ch, f, bb) in enumerate(fonts_bbs):
             tw, th = bb[2] - bb[0], bb[3] - bb[1]
             x = (W - tw) // 2
@@ -438,7 +455,8 @@ def prepare_lines(
     lines = clamp_timeline(enriched, lead=lead, audio_dur=audio_dur)
     for L in lines:
         if not L.chunks:
-            L.chunks = split_line(L.text, max_chars=max_chars) or [L.text]
+            # kinetic glyph units (not line-split pieces)
+            L.chunks = glyph_chunks(L.text) or [L.text]
     assign_layouts(lines, LAYOUTS)
     assign_chunk_times(lines, reveal_frac=REVEAL_FRAC, max_per_char=MAX_PER_CHAR)
     return lines
@@ -528,8 +546,8 @@ def render_mv(
     lst = clips / "list.txt"
     with open(lst, "w", encoding="utf-8") as f:
         for p in parts:
-            # ffmpeg concat demuxer: escape single quotes
-            sp = str(p).replace("'", "'\\''")
+            # absolute paths — concat demuxer resolves relative to list.txt dir
+            sp = str(Path(p).resolve()).replace("'", "'\\''")
             f.write(f"file '{sp}'\n")
 
     silent = work / "silent.mp4"
