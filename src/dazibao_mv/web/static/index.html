@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>大字报 MV — dazibao-mv</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <h1>大字报 MV</h1>
+      <p class="sub">上传音频 + 歌词 → 对齐渲染 → 下载竖屏视频</p>
+    </div>
+    <a class="gh" href="https://github.com/sunjoy323/dazibao-mv" target="_blank" rel="noopener">GitHub</a>
+  </header>
+
+  <main class="layout">
+    <section class="card">
+      <h2>1. 素材</h2>
+      <label class="field">
+        <span>音频（MP3 / WAV …）</span>
+        <input type="file" id="audio" accept="audio/*,.mp3,.wav,.m4a,.flac" />
+      </label>
+      <label class="field">
+        <span>歌词文件（可选，.txt / .lrc / .srt）</span>
+        <input type="file" id="lyricsFile" accept=".txt,.lrc,.srt,.text,text/*" />
+      </label>
+      <label class="field">
+        <span>或直接粘贴歌词</span>
+        <textarea id="lyricsText" rows="10" placeholder="纯文本一行一句；也可粘贴 LRC [mm:ss.xx] 或 SRT 时间轴"></textarea>
+      </label>
+      <div id="tsBadge" class="badge hidden">检测到时间轴 → 将跳过对齐</div>
+    </section>
+
+    <section class="card">
+      <h2>2. 样式与颜色</h2>
+      <label class="field">
+        <span>风格</span>
+        <select id="style"></select>
+      </label>
+      <p id="styleDesc" class="hint"></p>
+      <label class="check">
+        <input type="checkbox" id="useDefaults" checked />
+        使用风格默认配色（取消后可自定义）
+      </label>
+
+      <div id="colorPanel" class="colors disabled">
+        <div class="role-grid" id="roleColors">
+          <!-- verse/chorus/hook filled by JS -->
+        </div>
+        <div id="paletteNote" class="hint hidden">
+          poster-wall 使用交替色板。可保留默认，或在下方覆盖（可选）。
+        </div>
+        <div id="paletteEditors" class="hidden"></div>
+      </div>
+
+      <label class="field">
+        <span>字体</span>
+        <select id="font"></select>
+      </label>
+      <label class="field">
+        <span>背景色（非 poster-wall）</span>
+        <input type="color" id="bgColor" value="#141210" />
+      </label>
+    </section>
+
+    <section class="card">
+      <h2>3. 标题与渲染选项</h2>
+      <div class="row">
+        <label class="field grow">
+          <span>标题</span>
+          <input type="text" id="title" placeholder="歌名" />
+        </label>
+        <label class="field grow">
+          <span>作者</span>
+          <input type="text" id="author" placeholder="作者" />
+        </label>
+      </div>
+      <div class="row">
+        <label class="field">
+          <span>间隙模式 gap-mode</span>
+          <select id="gapMode">
+            <option value="hold" selected>hold（保持上一画面）</option>
+            <option value="black">black（黑场）</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Whisper 模型</span>
+          <select id="whisperModel">
+            <option value="tiny">tiny</option>
+            <option value="base">base</option>
+            <option value="small">small</option>
+            <option value="medium" selected>medium</option>
+            <option value="large-v3">large-v3</option>
+          </select>
+        </label>
+      </div>
+      <div class="row">
+        <label class="field">
+          <span>标题结束提前（秒）</span>
+          <input type="number" id="titleBefore" value="1.0" min="0" step="0.1" />
+        </label>
+        <label class="field">
+          <span>标题淡出（秒）</span>
+          <input type="number" id="titleFade" value="0.8" min="0" step="0.1" />
+        </label>
+        <label class="field">
+          <span>max-chars</span>
+          <input type="number" id="maxChars" value="9" min="4" max="20" />
+        </label>
+      </div>
+      <div class="row">
+        <label class="field">
+          <span>宽度</span>
+          <input type="number" id="width" value="1080" min="360" step="2" />
+        </label>
+        <label class="field">
+          <span>高度</span>
+          <input type="number" id="height" value="1920" min="640" step="2" />
+        </label>
+        <label class="field">
+          <span>FPS</span>
+          <input type="number" id="fps" value="24" min="12" max="60" />
+        </label>
+      </div>
+      <label class="check">
+        <input type="checkbox" id="lite" />
+        同时输出 lite 压缩版（*-lite.mp4）
+      </label>
+
+      <button type="button" id="submit" class="primary">开始生成</button>
+      <p id="formError" class="error"></p>
+    </section>
+
+    <section class="card" id="resultCard">
+      <h2>4. 进度与下载</h2>
+      <div id="jobStatus" class="status idle">尚未提交</div>
+      <progress id="jobProgress" max="100" value="0" class="hidden"></progress>
+      <video id="preview" controls class="hidden"></video>
+      <div class="actions">
+        <a id="dlMaster" class="btn hidden" href="#">下载 master.mp4</a>
+        <a id="dlLite" class="btn hidden" href="#">下载 lite.mp4</a>
+      </div>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <span>dazibao-mv web · 本地渲染，任务目录 ~/.cache/dazibao-mv/jobs</span>
+  </footer>
+  <script src="/app.js"></script>
+</body>
+</html>

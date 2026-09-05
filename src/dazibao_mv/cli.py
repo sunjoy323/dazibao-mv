@@ -90,6 +90,28 @@ def _cmd_render(args: argparse.Namespace) -> int:
     return 0
 
 
+
+def _cmd_serve(args: argparse.Namespace) -> int:
+    try:
+        import uvicorn
+    except ImportError:
+        print(
+            "Web extras not installed. Run: pip install 'dazibao-mv[web]'",
+            file=sys.stderr,
+        )
+        return 1
+    try:
+        from .web.app import create_app
+    except ImportError as e:
+        print(f"Failed to import web app: {e}", file=sys.stderr)
+        print("Install with: pip install 'dazibao-mv[web]'", file=sys.stderr)
+        return 1
+    app = create_app()
+    print(f"dazibao-mv web → http://{args.host}:{args.port}/", flush=True)
+    uvicorn.run(app, host=args.host, port=args.port, log_level="info")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="dazibao-mv",
@@ -162,6 +184,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Inter-lyric gaps: hold previous lyric/title (default) or solid black matte",
     )
     rp.set_defaults(func=_cmd_render)
+
+
+    # serve (web UI)
+    sv = sub.add_parser("serve", help="Run local web UI (FastAPI)")
+    sv.add_argument("--host", default="127.0.0.1", help="Bind host (default 127.0.0.1)")
+    sv.add_argument("--port", type=int, default=8765, help="Bind port (default 8765)")
+    sv.set_defaults(func=_cmd_serve)
 
     return p
 
