@@ -1,0 +1,24 @@
+name: ink-wash
+description: Rice-paper calm — deep ink type with soft smudged shadow
+mode: ink
+decor: false
+bg: [232, 226, 214]
+shadow_offset: [6, 8]
+font: /usr/share/fonts/opentype/noto/NotoSerifCJK-Bold.ttc
+verse:
+  fill: [18, 16, 14, 255]
+  shadow: [40, 36, 32, 90]
+  accent: [60, 55, 48, 100]
+  box: [232, 226, 214, 0]
+chorus:
+  fill: [14, 12, 10, 255]
+  shadow: [50, 44, 38, 110]
+  accent: [70, 62, 52, 120]
+  box: [232, 226, 214, 0]
+hook:
+  fill: [8, 6, 5, 255]
+  shadow: [55, 48, 40, 130]
+  accent: [80, 70, 58, 140]
+  box: [232, 226, 214, 0]
+hook_keywords: [长得好笑不行吗, 这难道不算一种漂亮吗, 还没开口已经自带鼓掌]
+chorus_keywords: [长得好笑不行吗, 这难道不算一种漂亮吗, 自带鼓掌, 冷场救援]

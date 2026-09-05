@@ -9,7 +9,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 from .bg import prepare_background, solid_bg
 from .split import glyph_chunks, split_line
@@ -20,6 +20,7 @@ from .styles import (
     load_style,
     palette_for,
     resolve_font,
+    style_bg_hex,
 )
 from .timeline import (
     LAYOUTS,
@@ -114,6 +115,210 @@ def hard_block_shadow_text(
     draw.text((x, y), text, font=font, fill=fill)
     if is_new:
         draw.text((x - 1, y - 1), text, font=font, fill=(255, 255, 255, 70))
+
+
+def _style_mode(style: Dict[str, Any]) -> str:
+    return str(style.get("mode") or "").strip().lower()
+
+
+def neon_glow_text(
+    overlay: Image.Image,
+    xy,
+    text,
+    font,
+    fill,
+    cyan,
+    magenta,
+    is_new: bool = False,
+):
+    """Electric dual-glow (magenta outer + cyan inner) then bright core fill."""
+    x, y = xy
+    W, H = overlay.size
+    # Magenta outer bloom
+    layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    ld = ImageDraw.Draw(layer)
+    ld.text((x, y), text, font=font, fill=_rgba(magenta[:3], 200))
+    overlay.alpha_composite(layer.filter(ImageFilter.GaussianBlur(radius=14)))
+    # Cyan tighter bloom
+    layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    ld = ImageDraw.Draw(layer)
+    ld.text((x, y), text, font=font, fill=_rgba(cyan[:3], 220))
+    overlay.alpha_composite(layer.filter(ImageFilter.GaussianBlur(radius=5)))
+    draw = ImageDraw.Draw(overlay)
+    # slight dual-offset accents
+    draw.text((x - 2, y + 1), text, font=font, fill=_rgba(magenta[:3], 120))
+    draw.text((x + 2, y - 1), text, font=font, fill=_rgba(cyan[:3], 140))
+    draw.text((x, y), text, font=font, fill=fill)
+    if is_new:
+        draw.text((x - 1, y - 1), text, font=font, fill=(255, 255, 255, 110))
+
+
+def comic_outline_text(
+    draw,
+    xy,
+    text,
+    font,
+    fill,
+    outline=(10, 10, 10, 255),
+    thickness: int = 5,
+    is_new: bool = False,
+):
+    """Thick black outline + flat primary fill (pop-comic punch)."""
+    x, y = xy
+    o = _rgba(outline[:3], outline[3] if len(outline) > 3 else 255)
+    for ox in range(-thickness, thickness + 1):
+        for oy in range(-thickness, thickness + 1):
+            if ox * ox + oy * oy <= thickness * thickness + thickness:
+                if ox or oy:
+                    draw.text((x + ox, y + oy), text, font=font, fill=o)
+    draw.text((x, y), text, font=font, fill=fill)
+    if is_new:
+        draw.text((x - 1, y - 1), text, font=font, fill=(255, 255, 255, 100))
+
+
+def soft_ink_text(
+    overlay: Image.Image,
+    xy,
+    text,
+    font,
+    fill,
+    shadow,
+    offset: Tuple[int, int] = (6, 8),
+    is_new: bool = False,
+):
+    """Deep ink fill with soft smudged (blurred) shadow — calligraphy poster feel."""
+    x, y = xy
+    W, H = overlay.size
+    ox, oy = int(offset[0]), int(offset[1])
+    layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    ld = ImageDraw.Draw(layer)
+    sh = shadow if len(shadow) == 4 else _rgba(shadow[:3], 100)
+    ld.text((x + ox, y + oy), text, font=font, fill=sh)
+    # slight extra smear offsets before blur
+    ld.text((x + ox + 2, y + oy + 1), text, font=font, fill=_rgba(sh[:3], max(40, sh[3] // 2)))
+    overlay.alpha_composite(layer.filter(ImageFilter.GaussianBlur(radius=4)))
+    draw = ImageDraw.Draw(overlay)
+    draw.text((x, y), text, font=font, fill=fill)
+    if is_new:
+        draw.text((x - 1, y - 1), text, font=font, fill=(255, 255, 255, 50))
+
+
+def draw_neon_scanlines(overlay: Image.Image, alpha: int = 28) -> None:
+    """Subtle CRT-ish scanlines over near-black neon frames."""
+    W, H = overlay.size
+    lines = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    d = ImageDraw.Draw(lines)
+    for y in range(0, H, 3):
+        d.line([(0, y), (W, y)], fill=(0, 0, 0, alpha), width=1)
+    # faint cyan vignette edges
+    d.rectangle([0, 0, W - 1, H - 1], outline=(0, 255, 255, 35), width=3)
+    overlay.alpha_composite(lines)
+
+
+def draw_blueprint_decor(
+    draw: ImageDraw.ImageDraw,
+    W: int,
+    H: int,
+    *,
+    line_index: int = 0,
+    grid: int = 54,
+    ink: Tuple[int, int, int, int] = (160, 210, 255, 55),
+) -> None:
+    """Faint drafting grid + crosshair marks (blueprint mode)."""
+    # major grid
+    major = ink
+    minor = (ink[0], ink[1], ink[2], max(25, ink[3] // 2))
+    for x in range(0, W, grid // 2):
+        col = major if x % grid == 0 else minor
+        draw.line([(x, 0), (x, H)], fill=col, width=1)
+    for y in range(0, H, grid // 2):
+        col = major if y % grid == 0 else minor
+        draw.line([(0, y), (W, y)], fill=col, width=1)
+    # crosshairs (center + corners)
+    cx, cy = W // 2, H // 2
+    arm = 48
+    cross = (200, 240, 255, 90)
+    for px, py in ((cx, cy), (120, 160), (W - 120, H - 200)):
+        draw.line([(px - arm, py), (px + arm, py)], fill=cross, width=2)
+        draw.line([(px, py - arm), (px, py + arm)], fill=cross, width=2)
+        draw.ellipse([px - 6, py - 6, px + 6, py + 6], outline=cross, width=2)
+    # sheet border
+    m = 28
+    draw.rectangle([m, m, W - m, H - m], outline=(180, 220, 255, 70), width=2)
+    # tiny sheet label
+    lab = f"DWG-{(line_index % 99) + 1:02d}"
+    try:
+        f = ImageFont.load_default()
+        draw.text((m + 8, m + 6), lab, font=f, fill=(200, 230, 255, 100))
+    except Exception:
+        pass
+
+
+def draw_comic_burst(
+    draw: ImageDraw.ImageDraw,
+    cx: float,
+    cy: float,
+    radius: float,
+    *,
+    fill=(255, 255, 255, 180),
+    outline=(10, 10, 10, 255),
+    rays: int = 14,
+) -> None:
+    """Radial comic burst / speed-starburst behind the newest glyph."""
+    pts_outer = []
+    for i in range(rays * 2):
+        ang = -math.pi / 2 + i * math.pi / rays
+        r = radius if i % 2 == 0 else radius * 0.42
+        pts_outer.append((cx + r * math.cos(ang), cy + r * math.sin(ang)))
+    draw.polygon(pts_outer, fill=fill, outline=outline)
+    # halftone-ish dots ring
+    for i in range(rays):
+        ang = i * 2 * math.pi / rays + 0.2
+        rr = radius * 0.72
+        dx = cx + rr * math.cos(ang)
+        dy = cy + rr * math.sin(ang)
+        draw.ellipse([dx - 4, dy - 4, dx + 4, dy + 4], fill=outline)
+
+
+def draw_styled_text(
+    overlay: Image.Image,
+    draw: ImageDraw.ImageDraw,
+    xy,
+    text,
+    font,
+    fill,
+    shadow,
+    accent,
+    style: Dict[str, Any],
+    *,
+    is_new: bool = False,
+    use_hard: bool = False,
+) -> None:
+    """Dispatch text paint by style mode (neon / comic / ink / poster / default)."""
+    mode = _style_mode(style)
+    shadow_off = tuple(style.get("shadow_offset") or (18, 18))
+    if mode == "neon":
+        # cyan from shadow channel, magenta from accent
+        neon_glow_text(overlay, xy, text, font, fill, shadow, accent, is_new=is_new)
+    elif mode == "comic":
+        comic_outline_text(draw, xy, text, font, fill, outline=shadow, thickness=5, is_new=is_new)
+    elif mode in ("ink", "ink_wash", "ink-wash"):
+        soft_ink_text(overlay, xy, text, font, fill, shadow, offset=shadow_off, is_new=is_new)
+    elif mode == "blueprint":
+        # crisp drafting type: thin cyan underglow + white fill
+        x, y = xy
+        for ox, oy in ((2, 2), (1, 1), (-1, 0), (0, -1)):
+            draw.text((x + ox, y + oy), text, font=font, fill=shadow)
+        draw.text((x - 1, y), text, font=font, fill=accent)
+        draw.text((x, y), text, font=font, fill=fill)
+        if is_new:
+            draw.text((x - 1, y - 1), text, font=font, fill=(255, 255, 255, 80))
+    elif use_hard or mode == "poster_fill":
+        hard_block_shadow_text(
+            draw, xy, text, font, fill, shadow, offset=shadow_off, is_new=is_new
+        )
+    else:
+        layered_text(draw, xy, text, font, fill, shadow, accent, is_new)
 
 
 def fit_font_size(draw, text, font_path, max_size, max_w, max_h=None):
@@ -295,8 +500,9 @@ def draw_layout(
     shown = "".join(chunks_visible)
     font_path = resolve_font(style.get("font"))
 
-    # Poster decor under text (even before glyphs if we want frame always)
-    if decor and palette is not None:
+    mode = _style_mode(style)
+    # Mode / poster decor under text
+    if decor and palette is not None and mode in ("", "poster_fill"):
         with_stars = (line_index % 3 == 2) or layout == "poster_fill_v"
         draw_poster_decor(
             draw, overlay, W, H, palette,
@@ -304,8 +510,12 @@ def draw_layout(
             font_path=font_path,
             with_stars=with_stars,
         )
+    elif mode == "blueprint" and (decor or style.get("decor", True)):
+        draw_blueprint_decor(draw, W, H, line_index=line_index)
 
     if not shown:
+        if mode == "neon":
+            draw_neon_scanlines(overlay)
         return Image.alpha_composite(canvas, overlay).convert("RGB")
 
     role = "hook" if hook else ("chorus" if chorus else "verse")
@@ -328,18 +538,38 @@ def draw_layout(
     sc_all = size_scale_for(nchar)
     shadow_off = tuple(style.get("shadow_offset") or (18, 18))
     use_hard = palette is not None or layout.startswith("poster_fill")
+    # Smash bars: keep classic dark bars only when style box has opacity
+    # (new modes set box alpha 0 — avoid muddy rectangles on colored bgs).
+    bar_fallback = box_c if (len(box_c) > 3 and box_c[3] == 0) or mode in (
+        "neon", "blueprint", "comic", "ink", "ink_wash", "ink-wash"
+    ) else (8, 8, 10, 150)
 
     def font_for(i: int, base_size: int):
         sc = punch if i == n - 1 else 1.0
         return _font(font_path, max(24, int(base_size * sc_all * sc)))
 
-    def put_text(d, xy, text, font, is_new=False):
-        if use_hard:
-            hard_block_shadow_text(
-                d, xy, text, font, fill, shadow, offset=shadow_off, is_new=is_new
-            )
-        else:
-            layered_text(d, xy, text, font, fill, shadow, accent, is_new)
+    def put_text(d, xy, text, font, is_new=False, target=None,
+                  fill_=None, shadow_=None, accent_=None):
+        nonlocal draw, overlay
+        tgt = target if target is not None else overlay
+        fl = fill_ if fill_ is not None else fill
+        sh = shadow_ if shadow_ is not None else shadow
+        ac = accent_ if accent_ is not None else accent
+        # Comic burst behind newest glyph
+        if mode == "comic" and is_new and (decor or style.get("decor", True)):
+            bb = d.textbbox(xy, text, font=font)
+            cx = (bb[0] + bb[2]) / 2
+            cy = (bb[1] + bb[3]) / 2
+            rad = max(40, (bb[2] - bb[0]) * 0.85)
+            burst_fill = (255, 255, 255, 200) if hook or chorus else (255, 250, 200, 190)
+            draw_comic_burst(d, cx, cy, rad, fill=burst_fill, outline=sh)
+        draw_styled_text(
+            tgt, d, xy, text, font, fl, sh, ac, style,
+            is_new=is_new, use_hard=use_hard and mode in ("", "poster_fill"),
+        )
+        # neon/ink mutate target; refresh draw handle when painting main overlay
+        if target is None:
+            draw = ImageDraw.Draw(overlay)
 
     if layout == "poster_fill_h":
         # Size against FULL line so layout stays stable while glyphs punch in
@@ -409,11 +639,14 @@ def draw_layout(
         pad = 52
         bx0, by0 = (W - tw) // 2 - pad, (H - th) // 2 - pad
         draw.rectangle([bx0, by0, bx0 + tw + 2 * pad, by0 + th + 2 * pad], fill=box_c)
-        layered_text(draw, ((W - tw) // 2, (H - th) // 2 - bb[1]), ch, f, fill, shadow, accent, True)
+        put_text(draw, ((W - tw) // 2, (H - th) // 2 - bb[1]), ch, f, is_new=True)
         if n > 1:
             trail = "".join(chunks_visible[:-1])[-6:]
             f2 = _font(font_path, 86)
-            layered_text(draw, (48, H - 210), trail, f2, verse_fill, verse_shadow, verse_accent, False)
+            put_text(
+                draw, (48, H - 210), trail, f2, is_new=False,
+                fill_=verse_fill, shadow_=verse_shadow, accent_=verse_accent,
+            )
 
     elif layout == "diagonal":
         base_size = 160
@@ -427,12 +660,13 @@ def draw_layout(
             y = 250 + i * 125
             td.rectangle(
                 [x - 14, y - 10, x + tw + 14, y + th + 10],
-                fill=box_c if i == n - 1 else (8, 8, 10, 150),
+                fill=box_c if i == n - 1 else bar_fallback,
             )
-            layered_text(td, (x, y - bb[1]), ch, f, fill, shadow, accent, i == n - 1)
+            put_text(td, (x, y - bb[1]), ch, f, is_new=(i == n - 1), target=tmp)
             if i == n - 1:
                 tmp = tmp.rotate(-8, resample=Image.Resampling.BICUBIC, center=(x + tw / 2, y + th / 2))
             overlay = Image.alpha_composite(overlay, tmp)
+            draw = ImageDraw.Draw(overlay)
 
     elif layout == "left_stack":
         base_size = 195 if len(shown) <= 5 else 148
@@ -455,9 +689,9 @@ def draw_layout(
             x = 56
             draw.rectangle(
                 [x - 18, y - 12, x + tw + 18, y + th + 12],
-                fill=box_c if i == n - 1 else (8, 8, 10, 155),
+                fill=box_c if i == n - 1 else bar_fallback,
             )
-            layered_text(draw, (x, y - bb[1]), ch, f, fill, shadow, accent, i == n - 1)
+            put_text(draw, (x, y - bb[1]), ch, f, is_new=(i == n - 1))
             y += th + 12
 
     elif layout == "right_cascade":
@@ -468,8 +702,8 @@ def draw_layout(
             tw, th = bb[2] - bb[0], bb[3] - bb[1]
             x = W - 72 - tw - i * 26
             y = 370 + i * (th + 6)
-            draw.rectangle([x - 16, y - 10, x + tw + 16, y + th + 10], fill=(8, 8, 10, 175))
-            layered_text(draw, (x, y - bb[1]), ch, f, fill, shadow, accent, i == n - 1)
+            draw.rectangle([x - 16, y - 10, x + tw + 16, y + th + 10], fill=bar_fallback)
+            put_text(draw, (x, y - bb[1]), ch, f, is_new=(i == n - 1))
 
     elif layout == "top_heavy":
         f1 = font_for(0, 250)
@@ -477,7 +711,7 @@ def draw_layout(
         bb = draw.textbbox((0, 0), head, font=f1)
         tw, th = bb[2] - bb[0], bb[3] - bb[1]
         draw.rectangle([20, 150, W - 20, 150 + th + 68], fill=box_c)
-        layered_text(draw, ((W - tw) // 2, 178 - bb[1]), head, f1, fill, shadow, accent, n == 1)
+        put_text(draw, ((W - tw) // 2, 178 - bb[1]), head, f1, is_new=(n == 1))
         if n > 1:
             rest = "".join(chunks_visible[1:])
             size2 = 120
@@ -488,9 +722,7 @@ def draw_layout(
                 f2 = _font(font_path, size2)
                 bb2 = draw.textbbox((0, 0), rest, font=f2)
             tw2 = bb2[2] - bb2[0]
-            layered_text(
-                draw, ((W - tw2) // 2, 150 + th + 100 - bb2[1]), rest, f2, fill, shadow, accent, False
-            )
+            put_text(draw, ((W - tw2) // 2, 150 + th + 100 - bb2[1]), rest, f2, is_new=False)
 
     elif layout == "bottom_banner":
         base_size = 150
@@ -513,7 +745,7 @@ def draw_layout(
         x = (W - total_w) // 2
         for i, (ch, f, bb) in enumerate(fonts_bbs):
             tw = bb[2] - bb[0]
-            layered_text(draw, (x, y - bb[1]), ch, f, fill, shadow, accent, i == n - 1)
+            put_text(draw, (x, y - bb[1]), ch, f, is_new=(i == n - 1))
             x += tw + 8
 
     else:  # center_slam
@@ -537,11 +769,13 @@ def draw_layout(
             x = (W - tw) // 2
             draw.rectangle(
                 [x - 22, y - 14, x + tw + 22, y + th + 14],
-                fill=box_c if i == n - 1 else (8, 8, 10, 150),
+                fill=box_c if i == n - 1 else bar_fallback,
             )
-            layered_text(draw, (x, y - bb[1]), ch, f, fill, shadow, accent, i == n - 1)
+            put_text(draw, (x, y - bb[1]), ch, f, is_new=(i == n - 1))
             y += th + 12
 
+    if mode == "neon":
+        draw_neon_scanlines(overlay)
     return Image.alpha_composite(canvas, overlay).convert("RGB")
 
 
@@ -850,6 +1084,7 @@ def build_title_clip(
         overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
         draw = ImageDraw.Draw(overlay)
 
+        mode = _style_mode(style)
         if poster and title_pal is not None and style.get("decor", True):
             draw_poster_decor(
                 draw, overlay, W, H, title_pal,
@@ -859,8 +1094,13 @@ def build_title_clip(
                 alpha=alpha,
             )
         elif not poster:
-            band_a = int(round(140 * alpha))
-            draw.rectangle([0, int(H * 0.32), W, int(H * 0.68)], fill=(8, 6, 5, band_a))
+            if mode == "blueprint" and style.get("decor", True):
+                draw_blueprint_decor(draw, W, H, line_index=0)
+            elif mode in ("neon", "comic", "ink", "ink_wash", "ink-wash"):
+                pass  # no classic dark band — mode bg + type carry the look
+            else:
+                band_a = int(round(140 * alpha))
+                draw.rectangle([0, int(H * 0.32), W, int(H * 0.68)], fill=(8, 6, 5, band_a))
 
         if poster:
             n_t, n_a, punch = title_reveal_counts(
@@ -899,12 +1139,14 @@ def build_title_clip(
                     poster=True,
                 )
             else:
-                # Non-poster: static full title (spacing only improved below)
+                # Non-poster: static full title (mode-aware paint)
                 if title:
-                    layered_text(
-                        draw, (x_title, y_title), title, f1,
-                        fill, shadow, _scale_rgba(hook_accent, alpha), True,
+                    draw_styled_text(
+                        overlay, draw, (x_title, y_title), title, f1,
+                        fill, shadow, _scale_rgba(hook_accent, alpha), style,
+                        is_new=True, use_hard=False,
                     )
+                    draw = ImageDraw.Draw(overlay)
                 title_bottom = y_title + th
 
         if author and alpha > 0.01 and n_a > 0 and f2 is not None and bb2 is not None:
@@ -925,12 +1167,16 @@ def build_title_clip(
                     author_fill, author_shadow, offset=(8, 8), is_new=False,
                 )
             else:
-                layered_text(
-                    draw, (x2, y2), author, f2,
+                draw_styled_text(
+                    overlay, draw, (x2, y2), author, f2,
                     author_fill, author_shadow,
-                    _scale_rgba(verse_accent, alpha), False,
+                    _scale_rgba(verse_accent, alpha), style,
+                    is_new=False, use_hard=False,
                 )
+                draw = ImageDraw.Draw(overlay)
 
+        if mode == "neon":
+            draw_neon_scanlines(overlay)
         Image.alpha_composite(canvas, overlay).convert("RGB").save(
             fdir / f"{fi:04d}.jpg", quality=88
         )
@@ -986,7 +1232,7 @@ def build_line_clip(
             height=height,
             palette=palette,
             line_index=idx,
-            decor=bool(poster and style.get("decor", True)),
+            decor=bool(style.get("decor", False)),
         )
         im.save(fdir / f"{fi:04d}.jpg", quality=88)
 
@@ -1063,7 +1309,7 @@ def _hold_line_clip(
         height=height,
         palette=palette,
         line_index=idx,
-        decor=bool(poster and style.get("decor", True)),
+        decor=bool(style.get("decor", False)),
     )
     for fi in range(frames):
         im.save(fdir / f"{fi:04d}.jpg", quality=88)
@@ -1112,6 +1358,7 @@ def _hold_title_clip(
     overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
 
+    mode = _style_mode(style)
     if poster and title_pal is not None and style.get("decor", True):
         draw_poster_decor(
             draw, overlay, W, H, title_pal,
@@ -1121,7 +1368,12 @@ def _hold_title_clip(
             alpha=alpha,
         )
     elif not poster:
-        draw.rectangle([0, int(H * 0.32), W, int(H * 0.68)], fill=(8, 6, 5, 140))
+        if mode == "blueprint" and style.get("decor", True):
+            draw_blueprint_decor(draw, W, H, line_index=0)
+        elif mode in ("neon", "comic", "ink", "ink_wash", "ink-wash"):
+            pass
+        else:
+            draw.rectangle([0, int(H * 0.32), W, int(H * 0.68)], fill=(8, 6, 5, 140))
 
     f1, bb1 = fit_font_size(draw, title or " ", font_path, 150, W - 100)
     if poster and title:
@@ -1135,7 +1387,11 @@ def _hold_title_clip(
                 draw, (x, y), title, f1, fill, shadow, offset=shadow_off, is_new=False
             )
         else:
-            layered_text(draw, (x, y), title, f1, fill, shadow, hook_accent, False)
+            draw_styled_text(
+                overlay, draw, (x, y), title, f1, fill, shadow, hook_accent, style,
+                is_new=False, use_hard=False,
+            )
+            draw = ImageDraw.Draw(overlay)
     if author:
         f2, bb2 = fit_font_size(draw, author, font_path, 72, W - 160)
         tw2 = bb2[2] - bb2[0]
@@ -1147,10 +1403,14 @@ def _hold_title_clip(
                 author_fill, author_shadow, offset=(8, 8), is_new=False,
             )
         else:
-            layered_text(
-                draw, (x2, y2), author, f2,
-                author_fill, author_shadow, verse_accent, False,
+            draw_styled_text(
+                overlay, draw, (x2, y2), author, f2,
+                author_fill, author_shadow, verse_accent, style,
+                is_new=False, use_hard=False,
             )
+            draw = ImageDraw.Draw(overlay)
+    if mode == "neon":
+        draw_neon_scanlines(overlay)
     frame = Image.alpha_composite(canvas, overlay).convert("RGB")
     for fi in range(frames):
         frame.save(fdir / f"{fi:04d}.jpg", quality=88)
@@ -1240,11 +1500,15 @@ def render_mv(
             flush=True,
         )
     else:
+        # Prefer style-declared solid bg when no custom image / generate
+        effective_bg = bg_color
+        if not bg_path and not bg_generate and style.get("bg_color"):
+            effective_bg = style_bg_hex(style, default=bg_color)
         bg_im, bg_jpg = prepare_background(
             width=width,
             height=height,
             bg_path=bg_path,
-            bg_color=bg_color,
+            bg_color=effective_bg,
             bg_generate=bg_generate,
             bg_config=bg_config,
             work_dir=work,

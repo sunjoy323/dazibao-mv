@@ -1,0 +1,24 @@
+name: blueprint
+description: Deep blueprint blue — white/cyan drafting type, grid + crosshair
+mode: blueprint
+decor: true
+bg: [12, 52, 110]
+shadow_offset: [2, 2]
+font: /usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc
+verse:
+  fill: [220, 240, 255, 255]
+  shadow: [80, 160, 220, 160]
+  accent: [140, 210, 255, 180]
+  box: [12, 52, 110, 0]
+chorus:
+  fill: [235, 250, 255, 255]
+  shadow: [100, 180, 230, 180]
+  accent: [160, 220, 255, 200]
+  box: [12, 52, 110, 0]
+hook:
+  fill: [255, 255, 255, 255]
+  shadow: [0, 200, 255, 200]
+  accent: [180, 240, 255, 220]
+  box: [12, 52, 110, 0]
+hook_keywords: [长得好笑不行吗, 这难道不算一种漂亮吗, 还没开口已经自带鼓掌]
+chorus_keywords: [长得好笑不行吗, 这难道不算一种漂亮吗, 自带鼓掌, 冷场救援]

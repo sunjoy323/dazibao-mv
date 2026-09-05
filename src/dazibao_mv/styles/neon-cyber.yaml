@@ -1,0 +1,24 @@
+name: neon-cyber
+description: Near-black nightclub — electric cyan/magenta glow type + scanlines
+mode: neon
+decor: true
+bg: [6, 8, 14]
+shadow_offset: [0, 0]
+font: /usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc
+verse:
+  fill: [180, 255, 250, 255]
+  shadow: [0, 220, 255, 180]
+  accent: [255, 40, 200, 200]
+  box: [6, 8, 14, 0]
+chorus:
+  fill: [220, 255, 255, 255]
+  shadow: [0, 255, 240, 200]
+  accent: [255, 60, 220, 220]
+  box: [6, 8, 14, 0]
+hook:
+  fill: [255, 240, 255, 255]
+  shadow: [255, 20, 180, 220]
+  accent: [0, 255, 255, 230]
+  box: [6, 8, 14, 0]
+hook_keywords: [长得好笑不行吗, 这难道不算一种漂亮吗, 还没开口已经自带鼓掌]
+chorus_keywords: [长得好笑不行吗, 这难道不算一种漂亮吗, 自带鼓掌, 冷场救援]

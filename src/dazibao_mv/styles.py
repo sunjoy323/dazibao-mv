@@ -86,6 +86,20 @@ def _normalize_style(data: Dict[str, Any], source: str) -> Dict[str, Any]:
     mode = str(style.get("mode") or "").strip().lower()
     style["mode"] = mode
     style["decor"] = bool(style.get("decor", False))
+    # Solid canvas bg for non-poster modes (neon / blueprint / comic / ink)
+    bg_raw = style.get("bg_color", style.get("bg"))
+    if bg_raw is not None:
+        if isinstance(bg_raw, str):
+            s = bg_raw.strip()
+            style["bg_color"] = s if s.startswith("#") else f"#{s}"
+            # also keep rgb tuple for draw helpers
+            hx = style["bg_color"].lstrip("#")
+            if len(hx) == 6:
+                style["bg"] = (int(hx[0:2], 16), int(hx[2:4], 16), int(hx[4:6], 16))
+        elif isinstance(bg_raw, (list, tuple)) and len(bg_raw) >= 3:
+            rgb = (int(bg_raw[0]), int(bg_raw[1]), int(bg_raw[2]))
+            style["bg"] = rgb
+            style["bg_color"] = f"#{rgb[0]:02x}{rgb[1]:02x}{rgb[2]:02x}"
     so = style.get("shadow_offset") or [18, 18]
     if isinstance(so, (list, tuple)) and len(so) >= 2:
         style["shadow_offset"] = (int(so[0]), int(so[1]))
@@ -119,11 +133,31 @@ def _normalize_style(data: Dict[str, Any], source: str) -> Dict[str, Any]:
 
 def is_poster_fill(style: Dict[str, Any]) -> bool:
     """True when style uses alternating solid poster palettes + fill layouts."""
-    if str(style.get("mode") or "").lower() == "poster_fill":
+    mode = str(style.get("mode") or "").strip().lower()
+    if mode == "poster_fill":
         return True
+    # Explicit non-poster modes (neon/blueprint/comic/ink/…) are never poster_fill
+    if mode:
+        return False
     if style.get("poster") is True:
         return True
     return bool(style.get("palettes"))
+
+
+def style_bg_hex(style: Dict[str, Any], default: str = "#141210") -> str:
+    """Solid background #RRGGBB from style ``bg`` / ``bg_color``, else default."""
+    raw = style.get("bg_color") or style.get("bg")
+    if not raw:
+        return default
+    if isinstance(raw, str):
+        s = raw.strip()
+        if not s.startswith("#"):
+            s = "#" + s
+        return s
+    if isinstance(raw, (list, tuple)) and len(raw) >= 3:
+        r, g, b = int(raw[0]), int(raw[1]), int(raw[2])
+        return f"#{r:02x}{g:02x}{b:02x}"
+    return default
 
 
 def palette_for(style: Dict[str, Any], index: int) -> Dict[str, Any]:

@@ -16,12 +16,20 @@
 | **laodeng-brick** — 暖金字 + 砖红钩 | [preview](examples/samples/preview-laodeng-brick.jpg) | [30s mp4](examples/samples/style-laodeng-brick-30s.mp4) |
 | **mono-poster** — 黑白海报 / 反相钩 | [preview](examples/samples/preview-mono-poster.jpg) | [30s mp4](examples/samples/style-mono-poster-30s.mp4) |
 | **poster-wall** — 大字报铺满 / 交替色板 | — | — |
+| **neon-cyber** — 近黑底 + 青/品红霓虹光晕 + 扫描线 | [preview](examples/samples/preview-neon-cyber.jpg) | [30s mp4](examples/samples/style-neon-cyber-30s.mp4) |
+| **blueprint** — 深蓝蓝图底 + 网格 / 准星 | [preview](examples/samples/preview-blueprint.jpg) | [30s mp4](examples/samples/style-blueprint-30s.mp4) |
+| **pop-comic** — 柠檬黄漫画冲撞 + 粗描边 / 爆裂 | [preview](examples/samples/preview-pop-comic.jpg) | [30s mp4](examples/samples/style-pop-comic-30s.mp4) |
+| **ink-wash** — 宣纸暖灰 + 柔墨阴影 | [preview](examples/samples/preview-ink-wash.jpg) | [30s mp4](examples/samples/style-ink-wash-30s.mp4) |
 
 GitHub 直链（需仓库权限）：
 
 - Ivory: https://github.com/sunjoy323/dazibao-mv/blob/main/examples/samples/style-dazibao-ivory-30s.mp4
 - Brick: https://github.com/sunjoy323/dazibao-mv/blob/main/examples/samples/style-laodeng-brick-30s.mp4
 - Mono: https://github.com/sunjoy323/dazibao-mv/blob/main/examples/samples/style-mono-poster-30s.mp4
+- Neon: https://github.com/sunjoy323/dazibao-mv/blob/main/examples/samples/style-neon-cyber-30s.mp4
+- Blueprint: https://github.com/sunjoy323/dazibao-mv/blob/main/examples/samples/style-blueprint-30s.mp4
+- Comic: https://github.com/sunjoy323/dazibao-mv/blob/main/examples/samples/style-pop-comic-30s.mp4
+- Ink: https://github.com/sunjoy323/dazibao-mv/blob/main/examples/samples/style-ink-wash-30s.mp4
 
 ---
 

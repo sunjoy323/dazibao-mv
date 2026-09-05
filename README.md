@@ -16,6 +16,10 @@ Same song, solid background, builtin styles (glyph / digraph punch). Paths in-re
 | **laodeng-brick** — warm gold + brick hook | [preview](examples/samples/preview-laodeng-brick.jpg) | [30s mp4](examples/samples/style-laodeng-brick-30s.mp4) |
 | **mono-poster** — B/W poster / inverted hook | [preview](examples/samples/preview-mono-poster.jpg) | [30s mp4](examples/samples/style-mono-poster-30s.mp4) |
 | **poster-wall** — full-screen dazibao / alternating palettes | — | — |
+| **neon-cyber** — near-black + cyan/magenta glow + scanlines | [preview](examples/samples/preview-neon-cyber.jpg) | [30s mp4](examples/samples/style-neon-cyber-30s.mp4) |
+| **blueprint** — deep blueprint blue + grid / crosshair | [preview](examples/samples/preview-blueprint.jpg) | [30s mp4](examples/samples/style-blueprint-30s.mp4) |
+| **pop-comic** — lemon comic punch + thick outline / burst | [preview](examples/samples/preview-pop-comic.jpg) | [30s mp4](examples/samples/style-pop-comic-30s.mp4) |
+| **ink-wash** — rice-paper + soft ink shadow | [preview](examples/samples/preview-ink-wash.jpg) | [30s mp4](examples/samples/style-ink-wash-30s.mp4) |
 
 ---
 

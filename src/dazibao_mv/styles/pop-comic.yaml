@@ -1,0 +1,24 @@
+name: pop-comic
+description: Lemon comic punch — thick black outline, flat primary fill, burst
+mode: comic
+decor: true
+bg: [255, 236, 60]
+shadow_offset: [0, 0]
+font: /usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc
+verse:
+  fill: [30, 90, 220, 255]
+  shadow: [10, 10, 10, 255]
+  accent: [220, 40, 50, 255]
+  box: [255, 236, 60, 0]
+chorus:
+  fill: [220, 40, 50, 255]
+  shadow: [10, 10, 10, 255]
+  accent: [30, 90, 220, 255]
+  box: [255, 236, 60, 0]
+hook:
+  fill: [220, 40, 50, 255]
+  shadow: [10, 10, 10, 255]
+  accent: [30, 90, 220, 255]
+  box: [255, 255, 255, 0]
+hook_keywords: [长得好笑不行吗, 这难道不算一种漂亮吗, 还没开口已经自带鼓掌]
+chorus_keywords: [长得好笑不行吗, 这难道不算一种漂亮吗, 自带鼓掌, 冷场救援]
