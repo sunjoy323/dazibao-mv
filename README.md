@@ -1,64 +1,76 @@
 # dazibao-mv
 
-Vertical kinetic **dazibao** lyric MV CLI — punchy CJK typography over a poster background, timed to your song.
+Vertical kinetic **dazibao** lyric MV — punchy CJK typography over a poster background, timed to your song.
 
-中文 / English
+**English** | [中文说明](README.zh-CN.md)
 
 ---
 
-## 功能展示 Style demos（30s）
+## Style demos（30s）
 
-同一首歌、同一纯色底，三种内置风格小样（逐字/双字轰出）。仓库内路径可直接点开：
+Same song, solid background, builtin styles (glyph / digraph punch). Paths in-repo:
 
 | Style | Preview | Video |
 |-------|---------|-------|
-| **dazibao-ivory** — 象牙字 + 深红钩 | [preview](examples/samples/preview-dazibao-ivory.jpg) | [30s mp4](examples/samples/style-dazibao-ivory-30s.mp4) |
-| **laodeng-brick** — 暖金字 + 砖红钩 | [preview](examples/samples/preview-laodeng-brick.jpg) | [30s mp4](examples/samples/style-laodeng-brick-30s.mp4) |
-| **mono-poster** — 黑白海报 / 反相钩 | [preview](examples/samples/preview-mono-poster.jpg) | [30s mp4](examples/samples/style-mono-poster-30s.mp4) |
-| **poster-wall** — 大字报铺满 / 交替底色 | — | — |
+| **dazibao-ivory** — ivory + crimson hook | [preview](examples/samples/preview-dazibao-ivory.jpg) | [30s mp4](examples/samples/style-dazibao-ivory-30s.mp4) |
+| **laodeng-brick** — warm gold + brick hook | [preview](examples/samples/preview-laodeng-brick.jpg) | [30s mp4](examples/samples/style-laodeng-brick-30s.mp4) |
+| **mono-poster** — B/W poster / inverted hook | [preview](examples/samples/preview-mono-poster.jpg) | [30s mp4](examples/samples/style-mono-poster-30s.mp4) |
+| **poster-wall** — full-screen dazibao / alternating palettes | — | — |
 
-GitHub（需有仓库权限）直链：
+---
 
-- Ivory: https://github.com/sunjoy323/dazibao-mv/blob/main/examples/samples/style-dazibao-ivory-30s.mp4
-- Brick: https://github.com/sunjoy323/dazibao-mv/blob/main/examples/samples/style-laodeng-brick-30s.mp4
-- Mono: https://github.com/sunjoy323/dazibao-mv/blob/main/examples/samples/style-mono-poster-30s.mp4
+## Dependencies
 
-
-## 依赖 Requirements
-
-- **Python** ≥ 3.10
-- **ffmpeg** on `PATH`（必须 / required）
-- Optional ASR: `faster-whisper` via `pip install 'dazibao-mv[align]'`
-- Fonts: prefers `NotoSansCJK-Bold.ttc`, falls back to `DejaVuSans-Bold`
+| Requirement | Notes |
+|-------------|--------|
+| **Python** ≥ 3.10 | |
+| **ffmpeg** on `PATH` | Required for encode / concat / mux |
+| Fonts | Prefers `NotoSansCJK-Bold.ttc`, falls back to DejaVu |
+| Optional ASR | `faster-whisper` via `pip install 'dazibao-mv[align]'` |
+| Optional Web UI | FastAPI / Uvicorn via `pip install 'dazibao-mv[web]'` |
 
 ```bash
 # Debian/Ubuntu
 sudo apt install ffmpeg fonts-noto-cjk
 ```
 
+Whisper models download on first use (cached under `~/.cache`).
+
 ---
 
-## 安装 Install
+## Install
 
 ```bash
 git clone https://github.com/sunjoy323/dazibao-mv.git
 cd dazibao-mv
-pip install -e '.[dev]'          # includes pytest
-# or with whisper alignment:
-pip install -e '.[align,dev]'
+
+# CLI only (render with --srt, no Whisper)
+pip install -e .
+
+# + Whisper alignment
+pip install -e '.[align]'
+
+# + Web UI
+pip install -e '.[web]'
+
+# Dev / tests (includes web + align extras)
+pip install -e '.[dev]'
+
+# Everything for local web + ASR
+pip install -e '.[web,align,dev]'
 ```
 
 ---
 
-## 命令 Commands
+## CLI usage
 
 ### `dazibao-mv styles`
 
-List builtin styles.
+List builtin styles and short descriptions.
 
 ### `dazibao-mv align`
 
-Align a lyrics text file to timings (SRT or whisper):
+Align a lyrics text file to timings (SRT or Whisper):
 
 ```bash
 dazibao-mv align --audio song.mp3 --lyrics lyrics.txt --out aligned.json
@@ -67,18 +79,26 @@ dazibao-mv align --audio song.mp3 --lyrics lyrics.txt --out aligned.json \
   --whisper-model medium --initial-prompt '歌名 作者' --max-line-sec 5.5
 ```
 
+| Flag | Default | Meaning |
+|------|---------|---------|
+| `--audio` | — | Audio for Whisper when no `--srt` |
+| `--lyrics` | required | Plain lyrics text (one line per lyric) |
+| `--out` | required | Output `aligned.json` |
+| `--srt` | — | Skip Whisper; use this SRT |
+| `--max-chars` | `9` | Split long lines for display |
+| `--whisper-model` | `medium` | faster-whisper size |
+| `--initial-prompt` | auto | Optional ASR prompt |
+| `--max-line-sec` | `5.5` | Cap single-line ASR span |
+
 Notes:
-- Writes `aligned.json` **and** a sibling `.srt` (same stem) for reproducible `--srt` renders.
-- Whisper defaults: model `medium`, **VAD off** (`vad_filter=False`), word timestamps on.
-- Overlong ASR blobs are soft-capped (~`--max-line-sec`, default `5.5`) so full-song align never keeps multi-dozen-second lyric lines.
-- First lyric special-case: search early ASR cues for a strong text match after the intro; overlong early blobs (instrumental bleed) are **end-anchored** so on-screen text does not finish before vocals.
-- Same `--whisper-model` / `--initial-prompt` / `--max-line-sec` flags are available on `render` when no `--srt` is given.
+
+- Writes `aligned.json` **and** a sibling `.srt` for reproducible `--srt` renders.
+- Whisper defaults: model `medium`, **VAD off**, word timestamps on.
+- First lyric: search early ASR cues; overlong intro bleed is end-anchored / word-onset corrected.
 
 ### `dazibao-mv render`
 
-Render the full vertical MV:
-
-Title card (when `--title` is set) auto-lasts until **1 second before the first lyric**, then **fades out** (`--title-fade`, default 0.8s). Pass `--title-dur` only to override. Gaps between clips **hold the previous visual** by default (`--gap-mode hold`); `--gap-mode black` restores solid matte gaps.
+Full vertical MV pipeline (align + kinetic frames + ffmpeg mux):
 
 ```bash
 dazibao-mv render \
@@ -89,10 +109,11 @@ dazibao-mv render \
   --title "歌名" --author "作者" \
   --style dazibao-ivory \
   --bg-color '#141210' \
+  --gap-mode hold \
   --lite
 ```
 
-#### Background modes 背景
+#### Background modes
 
 | Mode | Flags | Notes |
 |------|-------|-------|
@@ -100,81 +121,124 @@ dazibao-mv render \
 | Image file | `--bg PATH` | Fitted to `--width`×`--height` |
 | AI generate | `--bg-generate --bg-config config.yaml` | OpenAI-compatible Images API |
 
-Example image-gen config (`examples/config.imagegen.yaml`):
+See `examples/config.imagegen.yaml` for an image-gen config example.
 
-```yaml
-base_url: https://api.openai.com/v1
-api_key_env: OPENAI_API_KEY
-model: dall-e-3
-prompt: Dark vertical poster background, muted ivory and ink, no text, 9:16
-size: "1024x1792"
-```
+#### Styles
 
-#### Styles 样式
+1. **dazibao-ivory** — ivory type, teal-gray shadow, crimson hook smash  
+2. **laodeng-brick** — warm gold type, brick-red smash  
+3. **mono-poster** — stark B/W; white bars / inverted hook  
+4. **poster-wall** — poster-fill: glyphs auto-fit the screen, hard block shadow, decor + stamp「大字报」, **alternating solid palettes** per line. `--bg*` flags are ignored.
 
-Builtins:
-
-1. **dazibao-ivory** — ivory type, teal-gray shadow, crimson hook smash
-2. **laodeng-brick** — warm gold type, brick-red smash
-3. **mono-poster** — stark B/W; white bars / inverted hook
-4. **poster-wall** — dazibao poster-fill: glyphs auto-fit to fill the screen (horizontal or vertical), **hard block shadow** (not soft chromatic layers), double border + rules + stamp「大字报」, and **alternating solid palettes** per line (black/cream/crimson). `--bg-color` / `--bg` / `--bg-generate` are ignored; palettes win. Inter-lyric gaps **hold the previous lyric/title** (not black); use `--gap-mode black` for the old matte.
-
-Custom:
+Custom style file:
 
 ```bash
 dazibao-mv render ... --style-file examples/style_custom.yaml
 ```
 
-Each style YAML defines `verse` / `chorus` / `hook` RGBA colors, `font`, `hook_keywords`, `chorus_keywords`.
-
-#### poster-wall / `mode: poster_fill`
-
-```yaml
-mode: poster_fill
-decor: true
-shadow_offset: [18, 18]
-palettes:
-  - {bg: [10,10,10], fill: [242,237,228], shadow: [196,30,58], ...}   # A black/cream/red
-  - {bg: [242,232,216], fill: [196,30,58], shadow: [17,17,17], ...}  # B paper/crimson
-  - {bg: [196,30,58], fill: [242,237,228], shadow: [17,17,17], ...}  # C crimson/cream
-```
-
-- Layouts: `poster_fill_h` (short lines ~≤6–8 chars) / `poster_fill_v` (longer), cycling for mid-length.
-- Each lyric line paints `palettes[i % n]` as a solid background, then decor, then hard-shadow text sized to ~88–94% of the frame.
-- Title card uses palette B (cream paper) with the same decor + fade.
-
-#### Other options
+#### Important render flags
 
 | Flag | Default | Meaning |
 |------|---------|---------|
-| `--title-dur` | auto | Title card seconds; omit for auto `first.t0 − title-before-lyric` |
+| `--title` / `--author` | empty | Title card text |
+| `--title-dur` | auto | Override title seconds; omit for auto |
 | `--title-before-lyric` | `1.0` | Auto title ends this many seconds before first lyric |
-| `--title-fade` | `0.8` | Title/author (and dark band) fade-out at end of title card |
-| `--max-chars` | `9` | Max chars per display line (orphan merge ≤ max+1) |
-| `--lead` | `0.12` | Early punch; clamped so clips **never overlap** |
+| `--title-fade` | `0.8` | Title fade-out duration |
+| `--srt` | — | Skip Whisper |
+| `--max-chars` | `9` | Max chars per display line |
+| `--lead` | `0.12` | Early punch; clamped so clips never overlap |
+| `--gap-mode` | `hold` | `hold` previous visual or `black` matte |
 | `--lite` | off | Also write `*-lite.mp4` (~1600k video) |
-| `--width/--height/--fps` | `1080/1920/24` | Output geometry |
+| `--width` / `--height` / `--fps` | `1080` / `1920` / `24` | Output geometry |
+| `--whisper-model` | `medium` | Used when no `--srt` |
 
 ---
 
-## 硬规则 Hard rules
+## Web mode
 
-- Line clips in the ffmpeg concat **never overlap** (`t0 = max(prev_t1, start - LEAD)`)
-- Layout index cycles **separately** for chorus/hook vs verse
-- Kinetic reveal uses `glyph_chunks` (per-char / 1–2 glyph pairs), not whole sentences; `REVEAL_FRAC=0.48`, `MAX_PER_CHAR=0.30`; punch newest only
-- Layouts auto-shrink so each full lyric line fits on one 9:16 frame
-- `poster_fill` styles alternate solid palette backgrounds per line and use hard block shadows + screen-fill layouts (`poster_fill_h` / `poster_fill_v`)
+Friendly browser UI: upload MP3 + lyrics → backend align + render → preview / download.
+
+### Run locally
+
+```bash
+pip install -e '.[web,align]'
+dazibao-mv serve                          # http://127.0.0.1:8765/
+dazibao-mv serve --host 0.0.0.0 --port 8765
+```
+
+Open **http://127.0.0.1:8765/**.
+
+### Upload flow
+
+1. Choose an audio file (MP3 / WAV / …).  
+2. Paste lyrics **or** upload `.txt` / `.lrc` / `.srt`.  
+3. Pick a style (ivory / brick / mono / poster-wall), optional color overrides, font, title/author, gap-mode, Whisper model, lite, geometry.  
+4. Submit → poll job status → watch preview → download master (and lite if enabled).
+
+### Timestamped lyrics → skip Whisper
+
+If lyrics are **SRT** (`00:00:01,000 --> …`) or **LRC** (`[mm:ss.xx]…`), the backend **skips Whisper** and uses those timings. The UI shows a badge: **将跳过对齐**.
+
+Plain text lyrics still go through Whisper (`faster-whisper`; install `[align]`).
+
+### Job storage
+
+Work dirs default to `~/.cache/dazibao-mv/jobs/{id}` (override with env `DAZIBAO_DATA`).
+
+API sketch:
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | `/api/styles` | Builtin styles + colors / palettes |
+| `GET` | `/api/fonts` | Discover Noto CJK / DejaVu / other TTF·OTF |
+| `POST` | `/api/jobs` | Multipart: audio, lyrics file/text, JSON options |
+| `GET` | `/api/jobs/{id}` | Status: queued \| running \| done \| error |
+| `GET` | `/api/jobs/{id}/download` | master mp4; `?lite=1` for lite |
+
+### Docker Compose
+
+```bash
+docker compose up --build
+# open http://localhost:8765
+```
+
+- Image installs `ffmpeg`, `fonts-noto-cjk`, and the package with `[web,align]`.  
+- Container binds `0.0.0.0:8765`; compose maps `8765:8765`.  
+- Volumes: job data (`DAZIBAO_DATA=/data`) and Hugging Face / Whisper cache.
+
+Stop with `Ctrl+C` or `docker compose down`.
 
 ---
 
-## 开发 Dev
+## Hard rules
+
+- Line clips in the ffmpeg concat **never overlap** (`t0 = max(prev_t1, start - LEAD)`).  
+- Layout index cycles **separately** for chorus/hook vs verse.  
+- Kinetic reveal uses `glyph_chunks` (per-char / 1–2 glyph pairs), not whole sentences; `REVEAL_FRAC=0.48`, `MAX_PER_CHAR=0.30`; punch newest only.  
+- Layouts auto-shrink so each full lyric fits one 9:16 frame.  
+- Gaps **hold** the previous lyric/title by default (`--gap-mode hold`); `black` restores solid matte.  
+- Title card (when `--title` is set) lasts until **1s before first lyric**, then **fades** (`--title-fade`, default 0.8s).  
+- `poster_fill` / **poster-wall**: alternating solid palette backgrounds; hard block shadows; screen-fill layouts (`poster_fill_h` / `poster_fill_v`).
+
+---
+
+## Development
 
 ```bash
 pip install -e '.[dev]'
 pytest -q
 dazibao-mv --help
 dazibao-mv styles
+dazibao-mv serve --host 127.0.0.1 --port 8765
 ```
+
+Web API tests use FastAPI `TestClient` and mock heavy `render_mv` where needed.
+
+### Limitations
+
+- Web jobs run in a **single background worker** thread by default — long renders queue behind each other.  
+- First Whisper model download can be large and slow.  
+- Full-song kinetic renders are CPU-heavy (PIL frames + ffmpeg).
 
 ---
 

@@ -1,0 +1,17 @@
+services:
+  dazibao-web:
+    build: .
+    image: dazibao-mv:web
+    ports:
+      - "8765:8765"
+    environment:
+      DAZIBAO_DATA: /data
+    volumes:
+      # Persist job outputs / Whisper model cache across restarts
+      - dazibao-data:/data
+      - dazibao-hf-cache:/root/.cache
+    restart: unless-stopped
+
+volumes:
+  dazibao-data:
+  dazibao-hf-cache:
