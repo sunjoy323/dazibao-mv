@@ -50,9 +50,14 @@ def test_assign_poster_layouts_by_length():
     assign_poster_layouts(lines)
     assert lines[0].layout == "poster_fill_h"
     assert lines[1].layout == "poster_fill_h"
-    assert lines[2].layout == "poster_fill_h"
+    # third short would make 3×H — flip to V
+    assert lines[2].layout == "poster_fill_v"
     assert lines[3].layout == "poster_fill_v"
     assert lines[4].layout in ("poster_fill_h", "poster_fill_v")
+    # never 3 identical
+    lays = [L.layout for L in lines]
+    for i in range(len(lays) - 2):
+        assert not (lays[i] == lays[i + 1] == lays[i + 2])
 
 
 def test_font_fit_short_string_fills_width():

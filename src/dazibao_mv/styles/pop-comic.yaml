@@ -9,7 +9,7 @@ layouts: [comic_panel_full, comic_slash, comic_stack_burst, giant_char]
 punch:
   kind: slam
   amount: 2.2
-gap_mode: flash
+gap_mode: hold
 fill: panel
 flash_color: [255, 255, 255]
 reveal_frac: 0.40

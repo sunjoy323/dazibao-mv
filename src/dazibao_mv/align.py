@@ -349,9 +349,14 @@ def match_lyrics_to_cues(
 
         pieces = split_line(raw, max_chars=max_chars) or [raw]
         spans = redistribute_times(start, end, pieces)
+        # Mark pieces from one source lyric so layout anti-repeat can allow a pair
+        split_group = f"src-{len(aligned)}" if len(pieces) > 1 else None
         for piece, (t0, t1) in zip(pieces, spans):
             t0, t1 = cap_span(t0, t1, piece, max_sec=max_line_sec)
-            aligned.append({"start": round(t0, 3), "end": round(t1, 3), "text": piece})
+            item = {"start": round(t0, 3), "end": round(t1, 3), "text": piece}
+            if split_group is not None:
+                item["split_group"] = split_group
+            aligned.append(item)
 
     # ensure monotonic non-decreasing starts
     prev_end = 0.0

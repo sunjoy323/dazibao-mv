@@ -76,12 +76,13 @@ def test_punch_kinds_differ():
 
 
 def test_gap_mode_style_defaults():
-    assert resolve_gap_mode(load_style("neon-cyber"), "auto") == "flash"
-    assert resolve_gap_mode(load_style("pop-comic"), None) == "flash"
+    assert resolve_gap_mode(load_style("neon-cyber"), "auto") == "hold"
+    assert resolve_gap_mode(load_style("pop-comic"), None) == "hold"
     assert resolve_gap_mode(load_style("blueprint"), "auto") == "hold"
     assert resolve_gap_mode(load_style("ink-wash"), "auto") == "hold"
     assert resolve_gap_mode(load_style("dazibao-ivory"), "auto") == "hold"
-    assert resolve_gap_mode(load_style("neon-cyber"), "hold") == "hold"  # CLI override
+    assert resolve_gap_mode(load_style("neon-cyber"), "hold") == "hold"
+    assert resolve_gap_mode(load_style("neon-cyber"), "flash") == "flash"  # CLI override
     assert resolve_gap_mode(load_style("ink-wash"), "cut") == "black"
 
 

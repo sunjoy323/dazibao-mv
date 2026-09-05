@@ -161,15 +161,30 @@ def assign_layouts(
 
 
 def assign_poster_layouts(lines: Sequence[TimedLine]) -> None:
-    """Screen-fill poster layouts: short→H, long→V, mid alternate H/V."""
-    for i, L in enumerate(lines):
-        nchar = len(L.text.replace(" ", "").replace("\u3000", ""))
+    """Screen-fill poster layouts: short→H, long→V, mid alternate H/V.
+
+    Never allow 3 identical layouts in a row (flip H↔V to break a run).
+    """
+    prev: Optional[str] = None
+    run = 0
+    alt = 0
+    for L in lines:
+        nchar = len(L.text.replace(" ", "").replace("　", ""))
         if nchar <= 6:
-            L.layout = "poster_fill_h"
+            cand = "poster_fill_h"
         elif nchar >= 9:
-            L.layout = "poster_fill_v"
+            cand = "poster_fill_v"
         else:
-            L.layout = POSTER_LAYOUTS[i % 2]
+            cand = POSTER_LAYOUTS[alt % 2]
+            alt += 1
+        if prev is not None and cand == prev and run >= 2:
+            cand = "poster_fill_v" if cand == "poster_fill_h" else "poster_fill_h"
+        if cand == prev:
+            run += 1
+        else:
+            run = 1
+        prev = cand
+        L.layout = cand
 
 
 
@@ -184,20 +199,127 @@ def layouts_for_style(style: Dict[str, Any]) -> List[str]:
     return list(LAYOUTS)
 
 
-def assign_style_layouts(lines: Sequence[TimedLine], style: Dict[str, Any]) -> None:
-    """Assign layouts from style/mode pool (never default LAYOUTS for styled modes).
+def _pick_anti_repeat_layout(
+    pool: Sequence[str],
+    *,
+    preferred: str,
+    prev: Optional[str],
+    prev2: Optional[str],
+    run_len: int,
+    allow_same: bool,
+) -> str:
+    """Pick next layout with consecutive anti-repeat rules.
 
-    Comic: force giant_char for ≤2-char hooks.
+    - Never same as ``prev`` unless ``allow_same`` (shared split_group) and run < 2.
+    - Cap identical run length at 2 even for splits.
+    - Prefer ``preferred`` (verse/chorus counter); consecutive constraint wins.
+    - Small pools: skip last used; if only leftover equals last-2, still ≠ last.
+    """
+    layouts = [str(x) for x in pool if x]
+    if not layouts:
+        return preferred or "center_slam"
+    if preferred not in layouts:
+        preferred = layouts[0]
+
+    if allow_same and prev is not None and run_len < 2:
+        return prev
+
+    candidates = [x for x in layouts if x != prev] if prev is not None else list(layouts)
+    if not candidates:
+        candidates = list(layouts)
+
+    def _best(cands: List[str]) -> str:
+        if preferred in cands:
+            if prev2 is not None and preferred == prev2 and len(cands) > 1:
+                alt = [c for c in cands if c != prev2]
+                if alt:
+                    # still prefer preferred only if it differs from prev2
+                    pass
+                else:
+                    return preferred
+                # Prefer next-after-preferred among alt, else first alt
+                try:
+                    i = layouts.index(preferred)
+                except ValueError:
+                    return alt[0]
+                for j in range(1, len(layouts) + 1):
+                    nxt = layouts[(i + j) % len(layouts)]
+                    if nxt in alt:
+                        return nxt
+                return alt[0]
+            return preferred
+        if prev2 is not None:
+            alt = [c for c in cands if c != prev2]
+            if alt:
+                return alt[0]
+        return cands[0]
+
+    return _best(candidates)
+
+
+def assign_style_layouts(lines: Sequence[TimedLine], style: Dict[str, Any]) -> None:
+    """Assign layouts from style/mode pool with anti-repeat consecutive rules.
+
+    Walk lines in order; never assign the same layout as the previous line
+    unless both share ``extra["split_group"]`` (one source lyric split into
+    timed pieces). Even then, cap runs at 2 (never 3 identical in a row).
+    Verse/chorus counters still prefer alternating slots, but the consecutive
+    constraint wins. Comic: prefer giant_char for ≤2-char hooks (still subject
+    to anti-repeat).
     """
     layouts = layouts_for_style(style)
-    assign_layouts(lines, layouts)
+    n = len(layouts)
+    if n == 0:
+        assign_layouts(lines, LAYOUTS)
+        return
+
     mode = str(style.get("mode") or "").strip().lower()
-    if mode == "comic":
-        ideographic = "　"
-        for L in lines:
-            nchar = len(L.text.replace(" ", "").replace(ideographic, ""))
-            if nchar <= 2 and (L.hook or L.chorus):
-                L.layout = "giant_char"
+    ci = vi = 0
+    prev: Optional[str] = None
+    prev2: Optional[str] = None
+    prev_sg: Any = None
+    run_len = 0
+    punch_i = 0
+
+    for L in lines:
+        sg = L.extra.get("split_group")
+        if L.chorus or L.hook:
+            preferred = layouts[ci % n]
+            ci += 1
+        else:
+            preferred = layouts[vi % n]
+            vi += 1
+
+        if mode == "comic":
+            nchar = len(L.text.replace(" ", "").replace("　", ""))
+            if nchar <= 2 and (L.hook or L.chorus) and "giant_char" in layouts:
+                preferred = "giant_char"
+
+        allow_same = (
+            sg is not None
+            and prev_sg is not None
+            and sg == prev_sg
+            and prev is not None
+        )
+        chosen = _pick_anti_repeat_layout(
+            layouts,
+            preferred=preferred,
+            prev=prev,
+            prev2=prev2,
+            run_len=run_len,
+            allow_same=allow_same,
+        )
+        L.layout = chosen
+        L.extra["punch_variant"] = punch_i % 3
+        punch_i += 1
+
+        if chosen == prev:
+            run_len += 1
+        else:
+            run_len = 1
+        prev2 = prev
+        prev = chosen
+        prev_sg = sg
 
 
 def assign_chunk_times(

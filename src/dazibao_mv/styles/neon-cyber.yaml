@@ -10,7 +10,7 @@ punch:
   kind: glitch
   amount: 1.55
   glitch_px: 12
-gap_mode: flash
+gap_mode: hold
 fill: edge
 reveal_frac: 0.45
 max_per_char: 0.26
