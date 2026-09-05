@@ -1,0 +1,29 @@
+name: dazibao-ivory
+description: Ivory fills, deep ink shadows, crimson hook box
+font: /usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc
+verse:
+  fill: [242, 238, 230, 255]
+  shadow: [14, 14, 16, 255]
+  accent: [70, 78, 88, 210]
+  box: [10, 10, 12, 160]
+chorus:
+  fill: [245, 240, 232, 255]
+  shadow: [18, 18, 22, 255]
+  accent: [55, 90, 105, 230]
+  box: [12, 14, 18, 175]
+hook:
+  fill: [248, 246, 242, 255]
+  shadow: [90, 8, 18, 255]
+  accent: [140, 20, 40, 200]
+  box: [120, 10, 24, 220]
+hook_keywords:
+  - 后海不是海
+  - 八零后的老登
+  - 硬骨头敬此生
+chorus_keywords:
+  - 后海不是海
+  - 八零后的老登
+  - 硬骨头
+  - 肩上扛着天
+  - 哪怕岁月
+  - 谁还没在年轻

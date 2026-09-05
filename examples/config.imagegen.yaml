@@ -1,0 +1,8 @@
+# OpenAI-compatible images API config for --bg-generate
+base_url: https://api.openai.com/v1
+api_key_env: OPENAI_API_KEY
+model: dall-e-3
+prompt: >
+  Dark vertical poster background, muted ivory and ink tones,
+  abstract paper texture, cinematic grain, no text, 9:16
+size: "1024x1792"

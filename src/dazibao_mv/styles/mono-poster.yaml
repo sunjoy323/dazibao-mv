@@ -1,0 +1,25 @@
+name: mono-poster
+description: White/black high contrast poster
+font: /usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc
+verse:
+  fill: [245, 245, 245, 255]
+  shadow: [0, 0, 0, 255]
+  accent: [180, 180, 180, 200]
+  box: [0, 0, 0, 180]
+chorus:
+  fill: [255, 255, 255, 255]
+  shadow: [0, 0, 0, 255]
+  accent: [220, 220, 220, 220]
+  box: [0, 0, 0, 200]
+hook:
+  fill: [255, 255, 255, 255]
+  shadow: [0, 0, 0, 255]
+  accent: [255, 255, 255, 120]
+  box: [0, 0, 0, 230]
+hook_keywords:
+  - 后海不是海
+  - 八零后的老登
+chorus_keywords:
+  - 后海不是海
+  - 八零后的老登
+  - 硬骨头

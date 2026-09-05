@@ -1,0 +1,29 @@
+name: laodeng-brick
+description: Warm amber/brick hooks
+font: /usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc
+verse:
+  fill: [238, 232, 220, 255]
+  shadow: [12, 12, 14, 255]
+  accent: [90, 70, 48, 200]
+  box: [10, 10, 12, 165]
+chorus:
+  fill: [250, 242, 228, 255]
+  shadow: [16, 14, 12, 255]
+  accent: [160, 90, 35, 220]
+  box: [14, 12, 10, 180]
+hook:
+  fill: [255, 244, 230, 255]
+  shadow: [72, 18, 8, 255]
+  accent: [180, 70, 28, 210]
+  box: [140, 36, 16, 225]
+hook_keywords:
+  - 八零后的老登
+  - 硬骨头敬此生
+  - 老登就老登吧
+chorus_keywords:
+  - 八零后的老登
+  - 硬骨头
+  - 肩上扛着天
+  - 哪怕岁月
+  - 谁还没在年轻
+  - 老登就老登吧

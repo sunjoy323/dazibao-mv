@@ -1,0 +1,22 @@
+name: my-custom
+description: Example custom style
+font: /usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc
+verse:
+  fill: [240, 235, 225, 255]
+  shadow: [20, 20, 30, 255]
+  accent: [80, 100, 120, 200]
+  box: [8, 8, 12, 160]
+chorus:
+  fill: [250, 245, 235, 255]
+  shadow: [30, 20, 40, 255]
+  accent: [100, 60, 140, 220]
+  box: [12, 8, 20, 180]
+hook:
+  fill: [255, 250, 240, 255]
+  shadow: [100, 20, 40, 255]
+  accent: [180, 40, 80, 210]
+  box: [140, 20, 50, 220]
+hook_keywords:
+  - 高潮金句
+chorus_keywords:
+  - 副歌

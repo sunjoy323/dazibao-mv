@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dazibao-mv"
+version = "0.1.0"
+description = "Vertical kinetic dazibao lyric MV CLI"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+authors = [{name = "sunjoy323"}]
+dependencies = [
+  "Pillow>=10.0",
+  "PyYAML>=6.0",
+  "jieba>=0.42",
+]
+
+[project.optional-dependencies]
+align = ["faster-whisper>=1.0"]
+dev = ["pytest>=7.0", "faster-whisper>=1.0"]
+
+[project.scripts]
+dazibao-mv = "dazibao_mv.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+dazibao_mv = ["styles/*.yaml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
