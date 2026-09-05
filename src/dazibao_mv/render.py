@@ -578,6 +578,178 @@ def _scale_rgba(color: Tuple[int, ...], alpha_scale: float) -> Tuple[int, ...]:
     return (r, g, b, max(0, min(255, int(round(a * alpha_scale)))))
 
 
+
+def title_anim_phases(title_dur: float, fade_dur: float) -> Tuple[float, float, float]:
+    """Return (title_end, author_end, usable) seconds within the title card.
+
+    Timeline before fade:
+      0 → ~45% usable: song title glyph punch
+      ~45% → ~70%: author typewriter
+      rest → hold, then fade_dur fade-out
+    """
+    fade = max(0.0, min(float(fade_dur), max(0.0, float(title_dur) - 0.05)))
+    usable = max(0.05, float(title_dur) - fade)
+    title_end = usable * 0.45
+    author_end = usable * 0.70
+    return title_end, author_end, usable
+
+
+def title_reveal_counts(
+    t: float,
+    *,
+    title_dur: float,
+    fade_dur: float,
+    n_title: int,
+    n_author: int,
+) -> Tuple[int, int, float]:
+    """How many title/author glyphs are visible at time t (seconds into card).
+
+    Returns (n_title_visible, n_author_visible, newest_title_punch) where
+    newest_title_punch is 1.0 at the instant a glyph appears and decays to 0.
+    During/after fade window all glyphs are considered revealed (fade handles opacity).
+    """
+    n_title = max(0, int(n_title))
+    n_author = max(0, int(n_author))
+    title_end, author_end, usable = title_anim_phases(title_dur, fade_dur)
+    fade = max(0.0, float(title_dur) - usable)
+    # After title phase (and during fade), show everything
+    if t >= author_end or (fade > 0 and t >= usable):
+        return n_title, n_author, 0.0
+    if t >= title_end:
+        # author typewriter
+        span = max(1e-6, author_end - title_end)
+        frac = max(0.0, min(1.0, (t - title_end) / span))
+        n_a = int(math.ceil(frac * n_author)) if n_author else 0
+        if frac >= 1.0:
+            n_a = n_author
+        return n_title, min(n_author, max(0, n_a)), 0.0
+    # title glyph punch
+    if n_title <= 0:
+        return 0, 0, 0.0
+    span = max(1e-6, title_end)
+    frac = max(0.0, min(1.0, t / span))
+    if t <= 0:
+        return 0, 0, 0.0
+    n_vis = min(n_title, max(1, int(math.ceil(frac * n_title))))
+    slot = span / n_title
+    # age within current glyph's slot (0 at appear → 1 at next)
+    appear_t = (n_vis - 1) * slot
+    age = (t - appear_t) / max(1e-6, slot)
+    punch = max(0.0, 1.0 - max(0.0, min(1.0, age)))
+    return n_vis, 0, punch
+
+
+def _title_palette(style: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Resolve poster title-card palette (defaults to index 0 = high-contrast A)."""
+    if not is_poster_fill(style):
+        return None
+    pals = style.get("palettes") or []
+    idx = int(style.get("title_palette", 0) or 0)
+    if pals:
+        return pals[idx % len(pals)]
+    return palette_for(style, idx)
+
+
+def _title_author_gap_px(style: Dict[str, Any], poster: bool) -> int:
+    if poster:
+        return int(style.get("title_author_gap", 140) or 140)
+    # Non-poster: lightly larger than legacy 48
+    return int(style.get("title_author_gap", 72) or 72)
+
+
+def _title_colors(
+    style: Dict[str, Any], title_pal: Optional[Dict[str, Any]], alpha: float
+) -> Tuple[Tuple[int, ...], Tuple[int, ...], Tuple[int, ...], Tuple[int, ...], Optional[Tuple[int, int, int]]]:
+    """Return (fill, shadow, author_fill, author_shadow, bg_rgb|None) with alpha applied."""
+    tb = style.get("title") or {}
+    if title_pal is not None:
+        bg = tuple(tb.get("bg") or title_pal.get("bg") or (10, 10, 10))
+        fill_rgb = tuple(tb.get("fill") or title_pal.get("fill") or (242, 237, 228))
+        shadow_rgb = tuple(tb.get("shadow") or title_pal.get("shadow") or (196, 30, 58))
+        if "author_fill" in tb:
+            af = tuple(tb["author_fill"])
+        else:
+            lum = 0.299 * bg[0] + 0.587 * bg[1] + 0.114 * bg[2]
+            af = (40, 36, 32) if lum > 128 else (184, 176, 164)
+        if "author_shadow" in tb:
+            ash = tuple(tb["author_shadow"])
+        else:
+            ash = (17, 17, 17) if (0.299 * bg[0] + 0.587 * bg[1] + 0.114 * bg[2]) > 128 else (196, 30, 58)
+        a = int(255 * alpha)
+        return (
+            _rgba(fill_rgb, a),
+            _rgba(shadow_rgb, a),
+            _rgba(af, a),
+            _rgba(ash, a),
+            (int(bg[0]), int(bg[1]), int(bg[2])),
+        )
+    # non-poster: callers still use role colors; bg None
+    return (
+        _scale_rgba(color_tuple(style, "hook", "fill"), alpha),
+        _scale_rgba(color_tuple(style, "hook", "shadow"), alpha),
+        _scale_rgba(color_tuple(style, "verse", "fill"), alpha),
+        _scale_rgba(color_tuple(style, "verse", "shadow"), alpha),
+        None,
+    )
+
+
+def _draw_title_glyphs(
+    draw,
+    glyphs: Sequence[str],
+    n_vis: int,
+    *,
+    font_path: str,
+    base_size: int,
+    bb_full,
+    W: int,
+    H: int,
+    y_top: int,
+    fill,
+    shadow,
+    shadow_off: Tuple[int, int],
+    punch: float,
+    poster: bool,
+    accent=None,
+) -> Tuple[int, int]:
+    """Draw first n_vis title glyphs; return (title_bottom_y, title_height).
+
+    Newest glyph gets a scale punch when punch>0. Settled glyphs stay at base size.
+    """
+    n_vis = max(0, min(int(n_vis), len(glyphs)))
+    if n_vis <= 0 or not glyphs:
+        th = (bb_full[3] - bb_full[1]) if bb_full else 0
+        return y_top + th, th
+    items = []
+    for i in range(n_vis):
+        ch = glyphs[i]
+        sc = 1.0
+        if i == n_vis - 1 and punch > 0:
+            sc = 1.0 + 0.32 * punch
+        f = _font(font_path, max(24, int(base_size * sc)))
+        bb = draw.textbbox((0, 0), ch, font=f)
+        items.append((ch, f, bb, i == n_vis - 1 and punch > 0.15))
+    total_w = sum(bb[2] - bb[0] for _, _, bb, _ in items)
+    x = (W - total_w - (shadow_off[0] if poster else 0)) // 2
+    full_h = bb_full[3] - bb_full[1]
+    # y_top is draw-y for full title (= row_top - bb_full[1]).
+    # Per-glyph: row_top - bb[1], plus recenter when punched taller/shorter.
+    row_top = y_top + bb_full[1]
+    max_bottom = y_top + full_h
+    for ch, f, bb, is_new in items:
+        tw = bb[2] - bb[0]
+        th = bb[3] - bb[1]
+        yi = row_top - bb[1] + (full_h - th) // 2
+        if poster:
+            hard_block_shadow_text(
+                draw, (x, yi), ch, f, fill, shadow, offset=shadow_off, is_new=is_new
+            )
+        else:
+            layered_text(draw, (x, yi), ch, f, fill, shadow, accent or fill, is_new)
+        x += tw
+        max_bottom = max(max_bottom, yi + bb[3])
+    return max_bottom, full_h
+
+
 def title_fade_alpha(frame_index: int, frames: int, fade_dur: float, fps: int) -> float:
     """Opacity 1→0 over the last fade_dur seconds (linear). Full opacity before fade."""
     if frames <= 1 or fade_dur <= 0:
@@ -636,31 +808,49 @@ def build_title_clip(
     fdir.mkdir(parents=True, exist_ok=True)
     font_path = resolve_font(style.get("font"))
     poster = is_poster_fill(style)
-    # Title uses palette B (cream paper) when available, else A
-    title_pal = None
-    if poster:
-        pals = style.get("palettes") or []
-        title_pal = pals[1] if len(pals) > 1 else palette_for(style, 1)
-    hook_fill = color_tuple(style, "hook", "fill")
-    hook_shadow = color_tuple(style, "hook", "shadow")
-    hook_accent = color_tuple(style, "hook", "accent")
-    verse_fill = color_tuple(style, "verse", "fill")
-    verse_shadow = color_tuple(style, "verse", "shadow")
-    verse_accent = color_tuple(style, "verse", "accent")
+    title_pal = _title_palette(style)
     shadow_off = tuple(style.get("shadow_offset") or (18, 18))
+    author_gap = _title_author_gap_px(style, poster)
+    hook_accent = color_tuple(style, "hook", "accent")
+    verse_accent = color_tuple(style, "verse", "accent")
+
+    title_glyphs = glyph_chunks(title) if title else []
+    if title and not title_glyphs:
+        title_glyphs = list(title)
+    author_chars = list(author) if author else []
+
+    # Pre-fit fonts against full strings for stable layout
+    measure = ImageDraw.Draw(Image.new("RGBA", (W, H)))
+    if poster and title:
+        f1, bb1 = _fit_poster_h_font(
+            measure, title, font_path, W, H, shadow_off, target_w_frac=0.86
+        )
+    else:
+        f1, bb1 = fit_font_size(measure, title or " ", font_path, 150, W - 100)
+    base_size = int(getattr(f1, "size", 120) or 120)
+    tw, th = bb1[2] - bb1[0], bb1[3] - bb1[1]
+    x_title = (W - tw - (shadow_off[0] if poster else 0)) // 2
+    y_title = int(H * (0.34 if poster else 0.40)) - bb1[1]
+
+    f2 = None
+    bb2 = None
+    if author:
+        f2, bb2 = fit_font_size(measure, author, font_path, 72, W - 160)
 
     for fi in range(frames):
+        t = fi / float(fps)
         alpha = title_fade_alpha(fi, frames, fade_dur, fps)
-        if poster and title_pal is not None:
-            bg_rgb = tuple(title_pal.get("bg", (242, 232, 216)))
+        fill, shadow, author_fill, author_shadow, bg_rgb = _title_colors(
+            style, title_pal, alpha
+        )
+        if poster and bg_rgb is not None:
             canvas = Image.new("RGBA", (W, H), _rgba(bg_rgb, 255))
         else:
             canvas = bg_im.copy().convert("RGBA")
         overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
         draw = ImageDraw.Draw(overlay)
-    
+
         if poster and title_pal is not None and style.get("decor", True):
-            # fade decor with alpha by scaling palette colors via draw_poster_decor alpha
             draw_poster_decor(
                 draw, overlay, W, H, title_pal,
                 line_index=0,
@@ -668,56 +858,79 @@ def build_title_clip(
                 with_stars=True,
                 alpha=alpha,
             )
-            fill = _rgba(title_pal.get("fill", (196, 30, 58)), int(255 * alpha))
-            shadow = _rgba(title_pal.get("shadow", (17, 17, 17)), int(255 * alpha))
-            author_fill = fill
-            author_shadow = shadow
-        else:
+        elif not poster:
             band_a = int(round(140 * alpha))
             draw.rectangle([0, int(H * 0.32), W, int(H * 0.68)], fill=(8, 6, 5, band_a))
-            fill = _scale_rgba(hook_fill, alpha)
-            shadow = _scale_rgba(hook_shadow, alpha)
-            author_fill = _scale_rgba(verse_fill, alpha)
-            author_shadow = _scale_rgba(verse_shadow, alpha)
 
-        f1, bb1 = fit_font_size(draw, title or " ", font_path, 150, W - 100)
-        # poster title: fill more of the screen
-        if poster and title:
-            f1, bb1 = _fit_poster_h_font(draw, title, font_path, W, H, shadow_off, target_w_frac=0.86)
-        tw, th = bb1[2] - bb1[0], bb1[3] - bb1[1]
-        x = (W - tw - (shadow_off[0] if poster else 0)) // 2
-        y = int(H * (0.36 if poster else 0.40)) - bb1[1]
+        if poster:
+            n_t, n_a, punch = title_reveal_counts(
+                t,
+                title_dur=title_dur,
+                fade_dur=fade_dur,
+                n_title=len(title_glyphs),
+                n_author=len(author_chars),
+            )
+            # During fade, keep full text visible (opacity via alpha)
+            if alpha < 1.0 and t >= title_dur - fade_dur - 1e-9:
+                n_t = len(title_glyphs)
+                n_a = len(author_chars)
+                punch = 0.0
+        else:
+            # Non-poster: static full title/author (spacing only)
+            n_t, n_a, punch = len(title_glyphs), len(author_chars), 0.0
+
+        title_bottom = y_title + th
         if title and alpha > 0.01:
             if poster:
-                hard_block_shadow_text(
-                    draw, (x, y), title, f1, fill, shadow, offset=shadow_off, is_new=True
+                title_bottom, _ = _draw_title_glyphs(
+                    draw,
+                    title_glyphs,
+                    n_t,
+                    font_path=font_path,
+                    base_size=base_size,
+                    bb_full=bb1,
+                    W=W,
+                    H=H,
+                    y_top=y_title,
+                    fill=fill,
+                    shadow=shadow,
+                    shadow_off=shadow_off,
+                    punch=punch,
+                    poster=True,
                 )
             else:
-                layered_text(
-                    draw, (x, y), title, f1,
-                    fill,
-                    shadow,
-                    _scale_rgba(hook_accent, alpha),
-                    True,
-                )
-        if author and alpha > 0.01:
-            f2, bb2 = fit_font_size(draw, author, font_path, 72, W - 160)
-            tw2 = bb2[2] - bb2[0]
-            x2 = (W - tw2) // 2
-            y2 = y + th + 48
+                # Non-poster: static full title (spacing only improved below)
+                if title:
+                    layered_text(
+                        draw, (x_title, y_title), title, f1,
+                        fill, shadow, _scale_rgba(hook_accent, alpha), True,
+                    )
+                title_bottom = y_title + th
+
+        if author and alpha > 0.01 and n_a > 0 and f2 is not None and bb2 is not None:
+            shown = "".join(author_chars[:n_a])
+            # optional typewriter cursor while still revealing
+            cursor_on = False
+            title_end, author_end, _usable = title_anim_phases(title_dur, fade_dur)
+            if poster and n_a < len(author_chars) and title_end <= t < author_end:
+                cursor_on = (int(t * 6) % 2 == 0)
+            draw_text = shown + ("▌" if cursor_on else "")
+            tw2 = draw.textbbox((0, 0), draw_text, font=f2)
+            tw2w = tw2[2] - tw2[0]
+            x2 = (W - tw2w) // 2
+            y2 = title_bottom + author_gap - bb2[1]
             if poster:
                 hard_block_shadow_text(
-                    draw, (x2, y2 - bb2[1]), author, f2,
+                    draw, (x2, y2), draw_text, f2,
                     author_fill, author_shadow, offset=(8, 8), is_new=False,
                 )
             else:
                 layered_text(
-                    draw, (x2, y2 - bb2[1]), author, f2,
-                    author_fill,
-                    author_shadow,
-                    _scale_rgba(verse_accent, alpha),
-                    False,
+                    draw, (x2, y2), author, f2,
+                    author_fill, author_shadow,
+                    _scale_rgba(verse_accent, alpha), False,
                 )
+
         Image.alpha_composite(canvas, overlay).convert("RGB").save(
             fdir / f"{fi:04d}.jpg", quality=88
         )
@@ -726,6 +939,7 @@ def build_title_clip(
     _encode_frames(fdir, dst, fps, title_dur)
     _cleanup_frames(fdir)
     return dst
+
 
 
 def build_line_clip(
@@ -880,22 +1094,18 @@ def _hold_title_clip(
     fdir.mkdir(parents=True, exist_ok=True)
     font_path = resolve_font(style.get("font"))
     poster = is_poster_fill(style)
-    title_pal = None
-    if poster:
-        pals = style.get("palettes") or []
-        title_pal = pals[1] if len(pals) > 1 else palette_for(style, 1)
-    hook_fill = color_tuple(style, "hook", "fill")
-    hook_shadow = color_tuple(style, "hook", "shadow")
-    hook_accent = color_tuple(style, "hook", "accent")
-    verse_fill = color_tuple(style, "verse", "fill")
-    verse_shadow = color_tuple(style, "verse", "shadow")
-    verse_accent = color_tuple(style, "verse", "accent")
+    title_pal = _title_palette(style)
     shadow_off = tuple(style.get("shadow_offset") or (18, 18))
+    author_gap = _title_author_gap_px(style, poster)
+    hook_accent = color_tuple(style, "hook", "accent")
+    verse_accent = color_tuple(style, "verse", "accent")
     W, H = width, height
     alpha = 1.0
+    fill, shadow, author_fill, author_shadow, bg_rgb = _title_colors(
+        style, title_pal, alpha
+    )
 
-    if poster and title_pal is not None:
-        bg_rgb = tuple(title_pal.get("bg", (242, 232, 216)))
+    if poster and bg_rgb is not None:
         canvas = Image.new("RGBA", (W, H), _rgba(bg_rgb, 255))
     else:
         canvas = bg_im.copy().convert("RGBA")
@@ -910,23 +1120,15 @@ def _hold_title_clip(
             with_stars=True,
             alpha=alpha,
         )
-        fill = _rgba(title_pal.get("fill", (196, 30, 58)), 255)
-        shadow = _rgba(title_pal.get("shadow", (17, 17, 17)), 255)
-        author_fill = fill
-        author_shadow = shadow
-    else:
+    elif not poster:
         draw.rectangle([0, int(H * 0.32), W, int(H * 0.68)], fill=(8, 6, 5, 140))
-        fill = hook_fill
-        shadow = hook_shadow
-        author_fill = verse_fill
-        author_shadow = verse_shadow
 
     f1, bb1 = fit_font_size(draw, title or " ", font_path, 150, W - 100)
     if poster and title:
         f1, bb1 = _fit_poster_h_font(draw, title, font_path, W, H, shadow_off, target_w_frac=0.86)
     tw, th = bb1[2] - bb1[0], bb1[3] - bb1[1]
     x = (W - tw - (shadow_off[0] if poster else 0)) // 2
-    y = int(H * (0.36 if poster else 0.40)) - bb1[1]
+    y = int(H * (0.34 if poster else 0.40)) - bb1[1]
     if title:
         if poster:
             hard_block_shadow_text(
@@ -938,15 +1140,15 @@ def _hold_title_clip(
         f2, bb2 = fit_font_size(draw, author, font_path, 72, W - 160)
         tw2 = bb2[2] - bb2[0]
         x2 = (W - tw2) // 2
-        y2 = y + th + 48
+        y2 = y + th + author_gap - bb2[1]
         if poster:
             hard_block_shadow_text(
-                draw, (x2, y2 - bb2[1]), author, f2,
+                draw, (x2, y2), author, f2,
                 author_fill, author_shadow, offset=(8, 8), is_new=False,
             )
         else:
             layered_text(
-                draw, (x2, y2 - bb2[1]), author, f2,
+                draw, (x2, y2), author, f2,
                 author_fill, author_shadow, verse_accent, False,
             )
     frame = Image.alpha_composite(canvas, overlay).convert("RGB")
@@ -956,6 +1158,7 @@ def _hold_title_clip(
     _encode_frames(fdir, out, fps, dur)
     _cleanup_frames(fdir)
     return out
+
 
 
 def prepare_lines(

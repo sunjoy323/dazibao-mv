@@ -4,6 +4,15 @@ mode: poster_fill
 decor: true
 shadow_offset: [18, 18]
 font: /usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc
+# Title card uses palette A (black + cream + red) for max contrast — not cream-on-cream.
+# Lyric lines still cycle A/B/C via palette_for(line_index).
+title_palette: 0
+title_author_gap: 140
+title:
+  # Optional overrides; omitted channels inherit from the title palette.
+  # Author stays distinct from title fill (warm gray on black / charcoal on paper).
+  author_fill: [184, 176, 164]
+  author_shadow: [196, 30, 58]
 # Alternating poster palettes (bg/fill/shadow cycle per line index)
 palettes:
   - # A: black bg, cream fill, thick red hard shadow

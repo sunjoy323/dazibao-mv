@@ -94,6 +94,25 @@ def _normalize_style(data: Dict[str, Any], source: str) -> Dict[str, Any]:
     pals = style.get("palettes") or []
     style["palettes"] = [_normalize_palette(p) for p in pals if isinstance(p, dict)]
 
+    # Title-card extras (poster styles)
+    try:
+        style["title_palette"] = int(style.get("title_palette", 0))
+    except (TypeError, ValueError):
+        style["title_palette"] = 0
+    try:
+        style["title_author_gap"] = int(style.get("title_author_gap", 140))
+    except (TypeError, ValueError):
+        style["title_author_gap"] = 140
+    title_block = style.get("title") or {}
+    if isinstance(title_block, dict):
+        tb = {}
+        for key in ("fill", "shadow", "author_fill", "author_shadow", "bg"):
+            if key in title_block:
+                tb[key] = _as_rgb(title_block[key])
+        style["title"] = tb
+    else:
+        style["title"] = {}
+
     style["_source"] = source
     return style
 
