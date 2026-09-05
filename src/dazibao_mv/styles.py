@@ -43,6 +43,30 @@ def list_builtin_styles() -> List[str]:
     return sorted(p.stem for p in d.glob("*.yaml"))
 
 
+def _as_rgba(val: Any, default: Tuple[int, int, int, int] = (255, 255, 255, 255)) -> Tuple[int, int, int, int]:
+    if not val:
+        return default
+    t = tuple(int(x) for x in val)
+    if len(t) == 3:
+        return (*t, 255)  # type: ignore[return-value]
+    return t  # type: ignore[return-value]
+
+
+def _as_rgb(val: Any, default: Tuple[int, int, int] = (255, 255, 255)) -> Tuple[int, int, int]:
+    if not val:
+        return default
+    t = tuple(int(x) for x in val)
+    return (t[0], t[1], t[2])
+
+
+def _normalize_palette(p: Dict[str, Any]) -> Dict[str, Any]:
+    out = dict(p)
+    for key in ("bg", "fill", "shadow", "accent", "border", "rule", "stamp_bg", "stamp_fg", "label"):
+        if key in out:
+            out[key] = _as_rgb(out[key])
+    return out
+
+
 def _normalize_style(data: Dict[str, Any], source: str) -> Dict[str, Any]:
     style = dict(data)
     style["name"] = style.get("name") or Path(source).stem
@@ -55,8 +79,54 @@ def _normalize_style(data: Dict[str, Any], source: str) -> Dict[str, Any]:
         style[key] = block
     style.setdefault("hook_keywords", [])
     style.setdefault("chorus_keywords", [])
+
+    # Poster-fill extras
+    if style.get("poster") is True and not style.get("mode"):
+        style["mode"] = "poster_fill"
+    mode = str(style.get("mode") or "").strip().lower()
+    style["mode"] = mode
+    style["decor"] = bool(style.get("decor", False))
+    so = style.get("shadow_offset") or [18, 18]
+    if isinstance(so, (list, tuple)) and len(so) >= 2:
+        style["shadow_offset"] = (int(so[0]), int(so[1]))
+    else:
+        style["shadow_offset"] = (18, 18)
+    pals = style.get("palettes") or []
+    style["palettes"] = [_normalize_palette(p) for p in pals if isinstance(p, dict)]
+
     style["_source"] = source
     return style
+
+
+def is_poster_fill(style: Dict[str, Any]) -> bool:
+    """True when style uses alternating solid poster palettes + fill layouts."""
+    if str(style.get("mode") or "").lower() == "poster_fill":
+        return True
+    if style.get("poster") is True:
+        return True
+    return bool(style.get("palettes"))
+
+
+def palette_for(style: Dict[str, Any], index: int) -> Dict[str, Any]:
+    """Pick palette by line/index modulo; fall back to verse colors as a single palette."""
+    pals = style.get("palettes") or []
+    if pals:
+        return pals[int(index) % len(pals)]
+    # synthesize from verse block
+    fill = color_tuple(style, "verse", "fill")[:3]
+    shadow = color_tuple(style, "verse", "shadow")[:3]
+    accent = color_tuple(style, "verse", "accent")[:3]
+    return {
+        "bg": (10, 10, 10),
+        "fill": fill,
+        "shadow": shadow,
+        "accent": accent,
+        "border": fill,
+        "rule": fill,
+        "stamp_bg": shadow,
+        "stamp_fg": (10, 10, 10),
+        "label": fill,
+    }
 
 
 def load_style(name: Optional[str] = None, style_file: Optional[str] = None) -> Dict[str, Any]:

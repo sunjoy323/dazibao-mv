@@ -47,6 +47,11 @@ LAYOUTS = [
     "bottom_banner",
 ]
 
+POSTER_LAYOUTS = [
+    "poster_fill_h",
+    "poster_fill_v",
+]
+
 REVEAL_FRAC = 0.48
 MAX_PER_CHAR = 0.30
 
@@ -119,6 +124,18 @@ def assign_layouts(
         else:
             L.layout = layouts[vi % n]
             vi += 1
+
+
+def assign_poster_layouts(lines: Sequence[TimedLine]) -> None:
+    """Screen-fill poster layouts: short→H, long→V, mid alternate H/V."""
+    for i, L in enumerate(lines):
+        nchar = len(L.text.replace(" ", "").replace("\u3000", ""))
+        if nchar <= 6:
+            L.layout = "poster_fill_h"
+        elif nchar >= 9:
+            L.layout = "poster_fill_v"
+        else:
+            L.layout = POSTER_LAYOUTS[i % 2]
 
 
 def assign_chunk_times(

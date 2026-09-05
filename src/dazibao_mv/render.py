@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import shutil
 import subprocess
 import tempfile
@@ -10,14 +11,23 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from PIL import Image, ImageDraw, ImageFont
 
-from .bg import prepare_background
+from .bg import prepare_background, solid_bg
 from .split import glyph_chunks, split_line
-from .styles import classify_line, color_tuple, load_style, resolve_font
+from .styles import (
+    classify_line,
+    color_tuple,
+    is_poster_fill,
+    load_style,
+    palette_for,
+    resolve_font,
+)
 from .timeline import (
     LAYOUTS,
+    POSTER_LAYOUTS,
     TimedLine,
     assign_chunk_times,
     assign_layouts,
+    assign_poster_layouts,
     build_concat_list,
     clamp_timeline,
 )
@@ -68,6 +78,10 @@ def _font(path: str, size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
         return ImageFont.load_default()
 
 
+def _rgba(rgb: Tuple[int, ...], a: int = 255) -> Tuple[int, int, int, int]:
+    return (int(rgb[0]), int(rgb[1]), int(rgb[2]), int(a))
+
+
 def layered_text(draw, xy, text, font, fill, shadow, accent, is_new=False):
     x, y = xy
     for ox, oy in [(8, 8), (6, 6), (10, 7), (7, 10)]:
@@ -81,6 +95,25 @@ def layered_text(draw, xy, text, font, fill, shadow, accent, is_new=False):
     draw.text((x, y), text, font=font, fill=fill)
     if is_new:
         draw.text((x - 1, y - 1), text, font=font, fill=(255, 255, 255, 90))
+
+
+def hard_block_shadow_text(
+    draw,
+    xy,
+    text,
+    font,
+    fill,
+    shadow,
+    offset: Tuple[int, int] = (18, 18),
+    is_new: bool = False,
+):
+    """Single thick hard-offset block shadow (poster style — no soft multi-layer)."""
+    x, y = xy
+    ox, oy = int(offset[0]), int(offset[1])
+    draw.text((x + ox, y + oy), text, font=font, fill=shadow)
+    draw.text((x, y), text, font=font, fill=fill)
+    if is_new:
+        draw.text((x - 1, y - 1), text, font=font, fill=(255, 255, 255, 70))
 
 
 def fit_font_size(draw, text, font_path, max_size, max_w, max_h=None):
@@ -106,6 +139,138 @@ def size_scale_for(nchar: int) -> float:
     return 0.55
 
 
+def _star_points(cx: float, cy: float, r_outer: float, r_inner: float, n: int = 5):
+    pts = []
+    for i in range(n * 2):
+        ang = -math.pi / 2 + i * math.pi / n
+        r = r_outer if i % 2 == 0 else r_inner
+        pts.append((cx + r * math.cos(ang), cy + r * math.sin(ang)))
+    return pts
+
+
+def draw_poster_decor(
+    draw: ImageDraw.ImageDraw,
+    overlay: Image.Image,
+    W: int,
+    H: int,
+    palette: Dict[str, Any],
+    *,
+    line_index: int = 0,
+    font_path: str = "",
+    with_stars: bool = False,
+    alpha: float = 1.0,
+) -> None:
+    """Double border, mid rules, corner stamp「大字报」, serial labels."""
+    a = max(0, min(255, int(round(255 * alpha))))
+    if a <= 0:
+        return
+    border = _rgba(palette.get("border", (242, 237, 228)), a)
+    rule = _rgba(palette.get("rule", border[:3]), a)
+    stamp_bg = _rgba(palette.get("stamp_bg", (196, 30, 58)), a)
+    stamp_fg = _rgba(palette.get("stamp_fg", (10, 10, 10)), a)
+    label_c = _rgba(palette.get("label", border[:3]), a)
+
+    margin = 36
+    # outer thick + inner thin double rect
+    draw.rectangle([margin, margin, W - margin, H - margin], outline=border, width=6)
+    inset = margin + 14
+    draw.rectangle([inset, inset, W - inset, H - inset], outline=border, width=2)
+
+    # 1–2 thin horizontal rules behind text zone
+    y1 = int(H * 0.38)
+    y2 = int(H * 0.62)
+    draw.line([(inset + 8, y1), (W - inset - 8, y1)], fill=rule, width=2)
+    draw.line([(inset + 8, y2), (W - inset - 8, y2)], fill=rule, width=2)
+
+    if with_stars:
+        r_star = 22
+        # top-left accent star (stamp-ish), top-right border color
+        for cx, cy, col in (
+            (inset + 48, inset + 48, stamp_bg),
+            (W - inset - 48, inset + 48, border),
+        ):
+            draw.polygon(_star_points(cx, cy, r_star, r_star * 0.42), fill=col)
+
+    # tiny corner serials
+    serial = f"字第{(line_index % 999) + 1:03d}号"
+    lab_font = _font(font_path, 22) if font_path else ImageFont.load_default()
+    draw.text((inset + 10, H - inset - 36), serial, font=lab_font, fill=label_c)
+    draw.text((W - inset - 130, H - inset - 36), "工厂样片", font=lab_font, fill=label_c)
+
+    # tilted stamp bottom-right 「大字报」
+    stamp_w, stamp_h = 78, 110
+    stamp = Image.new("RGBA", (stamp_w + 20, stamp_h + 20), (0, 0, 0, 0))
+    sd = ImageDraw.Draw(stamp)
+    sd.rectangle([8, 8, 8 + stamp_w, 8 + stamp_h], fill=stamp_bg)
+    sf = _font(font_path, 28) if font_path else ImageFont.load_default()
+    # vertical characters
+    chars = "大字报"
+    cy = 18
+    for ch in chars:
+        bb = sd.textbbox((0, 0), ch, font=sf)
+        tw = bb[2] - bb[0]
+        sd.text((8 + (stamp_w - tw) // 2, cy - bb[1]), ch, font=sf, fill=stamp_fg)
+        cy += (bb[3] - bb[1]) + 4
+    stamp = stamp.rotate(18, expand=True, resample=Image.Resampling.BICUBIC)
+    sx = W - inset - stamp.width - 10
+    sy = H - inset - stamp.height - 50
+    overlay.alpha_composite(stamp, (max(0, sx), max(0, sy)))
+
+
+def _fit_poster_h_font(draw, text, font_path, W, H, shadow_off, target_w_frac=0.91):
+    """Auto-fit horizontal string to ~88–94% width and as tall as margins allow."""
+    ox, oy = shadow_off
+    margin = 70
+    max_w = int(W * target_w_frac) - ox
+    max_h = H - 2 * margin - oy
+    # binary-ish descent from large size
+    lo, hi = 40, int(min(W, H) * 0.72)
+    best = _font(font_path, lo)
+    best_bb = draw.textbbox((0, 0), text, font=best)
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        f = _font(font_path, mid)
+        bb = draw.textbbox((0, 0), text, font=f)
+        tw, th = bb[2] - bb[0], bb[3] - bb[1]
+        if tw <= max_w and th <= max_h:
+            best, best_bb = f, bb
+            lo = mid + 2
+        else:
+            hi = mid - 2
+    return best, best_bb
+
+
+def _fit_poster_v_size(draw, chunks, font_path, W, H, shadow_off, target_h_frac=0.88):
+    """Font size so vertical stack fills ~85–92% height; each glyph fits width."""
+    ox, oy = shadow_off
+    margin = 80
+    max_h = int(H * target_h_frac) - oy
+    max_w = W - 2 * margin - ox
+    n = max(1, len(chunks))
+    lo, hi = 40, int(H * 0.55)
+    best = lo
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        f = _font(font_path, mid)
+        total_h = 0
+        max_gw = 0
+        ok = True
+        for ch in chunks:
+            bb = draw.textbbox((0, 0), ch, font=f)
+            gw, gh = bb[2] - bb[0], bb[3] - bb[1]
+            total_h += gh + 8
+            max_gw = max(max_gw, gw)
+            if gw > max_w:
+                ok = False
+                break
+        if ok and total_h - 8 <= max_h:
+            best = mid
+            lo = mid + 2
+        else:
+            hi = mid - 2
+    return best
+
+
 def draw_layout(
     base: Image.Image,
     chunks_visible: Sequence[str],
@@ -118,35 +283,125 @@ def draw_layout(
     hook: bool = False,
     width: int = 1080,
     height: int = 1920,
+    palette: Optional[Dict[str, Any]] = None,
+    line_index: int = 0,
+    decor: bool = False,
 ) -> Image.Image:
     W, H = width, height
     canvas = base.copy().convert("RGBA")
     overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
+    # expose image for stamp compositing
     shown = "".join(chunks_visible)
+    font_path = resolve_font(style.get("font"))
+
+    # Poster decor under text (even before glyphs if we want frame always)
+    if decor and palette is not None:
+        with_stars = (line_index % 3 == 2) or layout == "poster_fill_v"
+        draw_poster_decor(
+            draw, overlay, W, H, palette,
+            line_index=line_index,
+            font_path=font_path,
+            with_stars=with_stars,
+        )
+
     if not shown:
-        return canvas.convert("RGB")
+        return Image.alpha_composite(canvas, overlay).convert("RGB")
 
     role = "hook" if hook else ("chorus" if chorus else "verse")
-    fill = color_tuple(style, role, "fill")
-    shadow = color_tuple(style, role, "shadow")
-    accent = color_tuple(style, role, "accent")
+    if palette is not None:
+        fill = _rgba(palette.get("fill", (242, 237, 228)))
+        shadow = _rgba(palette.get("shadow", (196, 30, 58)))
+        accent = _rgba(palette.get("accent", fill[:3]))
+    else:
+        fill = color_tuple(style, role, "fill")
+        shadow = color_tuple(style, role, "shadow")
+        accent = color_tuple(style, role, "accent")
     box_c = color_tuple(style, role, "box")
     verse_fill = color_tuple(style, "verse", "fill")
     verse_shadow = color_tuple(style, "verse", "shadow")
     verse_accent = color_tuple(style, "verse", "accent")
-    font_path = resolve_font(style.get("font"))
 
     n = len(chunks_visible)
     punch = 1.0 + 0.32 * max(0.0, 1.0 - t_local * 12)
     nchar = max(1, len(shown.replace(" ", "")))
     sc_all = size_scale_for(nchar)
+    shadow_off = tuple(style.get("shadow_offset") or (18, 18))
+    use_hard = palette is not None or layout.startswith("poster_fill")
 
     def font_for(i: int, base_size: int):
         sc = punch if i == n - 1 else 1.0
         return _font(font_path, max(24, int(base_size * sc_all * sc)))
 
-    if layout == "giant_char":
+    def put_text(d, xy, text, font, is_new=False):
+        if use_hard:
+            hard_block_shadow_text(
+                d, xy, text, font, fill, shadow, offset=shadow_off, is_new=is_new
+            )
+        else:
+            layered_text(d, xy, text, font, fill, shadow, accent, is_new)
+
+    if layout == "poster_fill_h":
+        # Size against FULL line so layout stays stable while glyphs punch in
+        full = full_text or shown
+        f_base, bb_full = _fit_poster_h_font(draw, full, font_path, W, H, shadow_off)
+        base_size = getattr(f_base, "size", 120)
+        # Draw visible chunks left-to-right with stable full-line centering
+        # Measure each chunk at settled size; newest may punch
+        settled = []
+        for i, ch in enumerate(chunks_visible):
+            sc = punch if i == n - 1 else 1.0
+            f = _font(font_path, max(24, int(base_size * sc)))
+            bb = draw.textbbox((0, 0), ch, font=f)
+            settled.append((ch, f, bb))
+        # Total width of settled (approx) — for centering use full-line width at base
+        full_w = bb_full[2] - bb_full[0]
+        # Build positions from left of full string box
+        # Recompute using settled sizes for visible only, centered as a group
+        gap = 0
+        total_w = sum(bb[2] - bb[0] for _, _, bb in settled) + gap * max(0, n - 1)
+        # Center visible string; full_w keeps sizing stable as glyphs punch in
+        _ = full_w  # sizing reference (fit against full line)
+        x = (W - total_w - shadow_off[0]) // 2
+        # vertical center using full glyph height
+        full_h = bb_full[3] - bb_full[1]
+        y = (H - full_h - shadow_off[1]) // 2 - bb_full[1]
+        for i, (ch, f, bb) in enumerate(settled):
+            tw = bb[2] - bb[0]
+            # recenter each punched glyph vertically if scaled
+            th = bb[3] - bb[1]
+            yi = (H - th - shadow_off[1]) // 2 - bb[1]
+            put_text(draw, (x, yi), ch, f, is_new=(i == n - 1))
+            x += tw + gap
+
+    elif layout == "poster_fill_v":
+        full_chunks = glyph_chunks(full_text) if full_text else list(chunks_visible)
+        if not full_chunks:
+            full_chunks = list(chunks_visible)
+        base_size = _fit_poster_v_size(draw, full_chunks, font_path, W, H, shadow_off)
+        # Measure full stack height at settled size for centering
+        gap = 8
+        full_bbs = []
+        for ch in full_chunks:
+            f = _font(font_path, base_size)
+            bb = draw.textbbox((0, 0), ch, font=f)
+            full_bbs.append(bb)
+        total_h = sum(bb[3] - bb[1] for bb in full_bbs) + gap * max(0, len(full_bbs) - 1)
+        y = (H - total_h - shadow_off[1]) // 2
+        for i, ch in enumerate(chunks_visible):
+            sc = punch if i == n - 1 else 1.0
+            f = _font(font_path, max(24, int(base_size * sc)))
+            bb = draw.textbbox((0, 0), ch, font=f)
+            tw, th = bb[2] - bb[0], bb[3] - bb[1]
+            x = (W - tw - shadow_off[0]) // 2
+            # use settled slot y from full stack
+            put_text(draw, (x, y - bb[1]), ch, f, is_new=(i == n - 1))
+            # advance by settled (non-punched) height for stable slots
+            f_set = _font(font_path, base_size)
+            bb_set = draw.textbbox((0, 0), ch, font=f_set)
+            y += (bb_set[3] - bb_set[1]) + gap
+
+    elif layout == "giant_char":
         ch = chunks_visible[-1]
         f = font_for(n - 1, int(min(W, H) * 0.60))
         bb = draw.textbbox((0, 0), ch, font=f)
@@ -380,44 +635,89 @@ def build_title_clip(
     fdir = clips_dir / "f_title"
     fdir.mkdir(parents=True, exist_ok=True)
     font_path = resolve_font(style.get("font"))
+    poster = is_poster_fill(style)
+    # Title uses palette B (cream paper) when available, else A
+    title_pal = None
+    if poster:
+        pals = style.get("palettes") or []
+        title_pal = pals[1] if len(pals) > 1 else palette_for(style, 1)
     hook_fill = color_tuple(style, "hook", "fill")
     hook_shadow = color_tuple(style, "hook", "shadow")
     hook_accent = color_tuple(style, "hook", "accent")
     verse_fill = color_tuple(style, "verse", "fill")
     verse_shadow = color_tuple(style, "verse", "shadow")
     verse_accent = color_tuple(style, "verse", "accent")
+    shadow_off = tuple(style.get("shadow_offset") or (18, 18))
 
     for fi in range(frames):
         alpha = title_fade_alpha(fi, frames, fade_dur, fps)
-        canvas = bg_im.copy().convert("RGBA")
+        if poster and title_pal is not None:
+            bg_rgb = tuple(title_pal.get("bg", (242, 232, 216)))
+            canvas = Image.new("RGBA", (W, H), _rgba(bg_rgb, 255))
+        else:
+            canvas = bg_im.copy().convert("RGBA")
         overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
         draw = ImageDraw.Draw(overlay)
-        band_a = int(round(140 * alpha))
-        draw.rectangle([0, int(H * 0.32), W, int(H * 0.68)], fill=(8, 6, 5, band_a))
-        f1, bb1 = fit_font_size(draw, title or " ", font_path, 150, W - 100)
-        tw, th = bb1[2] - bb1[0], bb1[3] - bb1[1]
-        x = (W - tw) // 2
-        y = int(H * 0.40) - bb1[1]
-        if title and alpha > 0.01:
-            layered_text(
-                draw, (x, y), title, f1,
-                _scale_rgba(hook_fill, alpha),
-                _scale_rgba(hook_shadow, alpha),
-                _scale_rgba(hook_accent, alpha),
-                True,
+    
+        if poster and title_pal is not None and style.get("decor", True):
+            # fade decor with alpha by scaling palette colors via draw_poster_decor alpha
+            draw_poster_decor(
+                draw, overlay, W, H, title_pal,
+                line_index=0,
+                font_path=font_path,
+                with_stars=True,
+                alpha=alpha,
             )
+            fill = _rgba(title_pal.get("fill", (196, 30, 58)), int(255 * alpha))
+            shadow = _rgba(title_pal.get("shadow", (17, 17, 17)), int(255 * alpha))
+            author_fill = fill
+            author_shadow = shadow
+        else:
+            band_a = int(round(140 * alpha))
+            draw.rectangle([0, int(H * 0.32), W, int(H * 0.68)], fill=(8, 6, 5, band_a))
+            fill = _scale_rgba(hook_fill, alpha)
+            shadow = _scale_rgba(hook_shadow, alpha)
+            author_fill = _scale_rgba(verse_fill, alpha)
+            author_shadow = _scale_rgba(verse_shadow, alpha)
+
+        f1, bb1 = fit_font_size(draw, title or " ", font_path, 150, W - 100)
+        # poster title: fill more of the screen
+        if poster and title:
+            f1, bb1 = _fit_poster_h_font(draw, title, font_path, W, H, shadow_off, target_w_frac=0.86)
+        tw, th = bb1[2] - bb1[0], bb1[3] - bb1[1]
+        x = (W - tw - (shadow_off[0] if poster else 0)) // 2
+        y = int(H * (0.36 if poster else 0.40)) - bb1[1]
+        if title and alpha > 0.01:
+            if poster:
+                hard_block_shadow_text(
+                    draw, (x, y), title, f1, fill, shadow, offset=shadow_off, is_new=True
+                )
+            else:
+                layered_text(
+                    draw, (x, y), title, f1,
+                    fill,
+                    shadow,
+                    _scale_rgba(hook_accent, alpha),
+                    True,
+                )
         if author and alpha > 0.01:
             f2, bb2 = fit_font_size(draw, author, font_path, 72, W - 160)
             tw2 = bb2[2] - bb2[0]
             x2 = (W - tw2) // 2
             y2 = y + th + 48
-            layered_text(
-                draw, (x2, y2 - bb2[1]), author, f2,
-                _scale_rgba(verse_fill, alpha),
-                _scale_rgba(verse_shadow, alpha),
-                _scale_rgba(verse_accent, alpha),
-                False,
-            )
+            if poster:
+                hard_block_shadow_text(
+                    draw, (x2, y2 - bb2[1]), author, f2,
+                    author_fill, author_shadow, offset=(8, 8), is_new=False,
+                )
+            else:
+                layered_text(
+                    draw, (x2, y2 - bb2[1]), author, f2,
+                    author_fill,
+                    author_shadow,
+                    _scale_rgba(verse_accent, alpha),
+                    False,
+                )
         Image.alpha_composite(canvas, overlay).convert("RGB").save(
             fdir / f"{fi:04d}.jpg", quality=88
         )
@@ -446,13 +746,21 @@ def build_line_clip(
     fdir = clips_dir / f"f_{idx:03d}"
     fdir.mkdir(parents=True, exist_ok=True)
 
+    poster = is_poster_fill(style)
+    palette = palette_for(style, idx) if poster else None
+    if poster and palette is not None:
+        bg_rgb = tuple(palette.get("bg", (10, 10, 10)))
+        line_bg = Image.new("RGB", (width, height), bg_rgb)
+    else:
+        line_bg = bg_im
+
     for fi in range(frames):
         t = t0 + fi / fps
         n_show = sum(1 for ct in line.chunk_times if t >= ct)
         n_show = max(1, min(n_show, len(line.chunks)))
         t_local = t - line.chunk_times[n_show - 1]
         im = draw_layout(
-            bg_im,
+            line_bg,
             line.chunks[:n_show],
             line.text,
             line.layout,
@@ -462,6 +770,9 @@ def build_line_clip(
             hook=line.hook,
             width=width,
             height=height,
+            palette=palette,
+            line_index=idx,
+            decor=bool(poster and style.get("decor", True)),
         )
         im.save(fdir / f"{fi:04d}.jpg", quality=88)
 
@@ -519,7 +830,10 @@ def prepare_lines(
         if not L.chunks:
             # kinetic glyph units (not line-split pieces)
             L.chunks = glyph_chunks(L.text) or [L.text]
-    assign_layouts(lines, LAYOUTS)
+    if is_poster_fill(style):
+        assign_poster_layouts(lines)
+    else:
+        assign_layouts(lines, LAYOUTS)
     assign_chunk_times(lines, reveal_frac=REVEAL_FRAC, max_per_char=MAX_PER_CHAR)
     return lines
 
@@ -558,15 +872,27 @@ def render_mv(
     clips.mkdir(parents=True, exist_ok=True)
 
     audio_dur = _probe_audio_duration(audio)
-    bg_im, bg_jpg = prepare_background(
-        width=width,
-        height=height,
-        bg_path=bg_path,
-        bg_color=bg_color,
-        bg_generate=bg_generate,
-        bg_config=bg_config,
-        work_dir=work,
-    )
+    poster = is_poster_fill(style)
+    # poster_fill: solid palettes win — ignore --bg-color / --bg / --bg-generate
+    if poster:
+        bg_im = solid_bg("#0a0a0a", width, height)
+        bg_jpg = work / "bg.jpg"
+        bg_im.save(bg_jpg, quality=95)
+        print(
+            "poster_fill: ignoring --bg/--bg-color/--bg-generate; "
+            "using per-line palette backgrounds",
+            flush=True,
+        )
+    else:
+        bg_im, bg_jpg = prepare_background(
+            width=width,
+            height=height,
+            bg_path=bg_path,
+            bg_color=bg_color,
+            bg_generate=bg_generate,
+            bg_config=bg_config,
+            work_dir=work,
+        )
 
     lines = prepare_lines(
         aligned, style, lead=lead, audio_dur=audio_dur, max_chars=max_chars

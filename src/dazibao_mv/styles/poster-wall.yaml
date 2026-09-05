@@ -1,0 +1,56 @@
+name: poster-wall
+description: Dazibao poster-fill — alternating palettes, hard block shadow, screen-filling glyphs
+mode: poster_fill
+decor: true
+shadow_offset: [18, 18]
+font: /usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc
+# Alternating poster palettes (bg/fill/shadow cycle per line index)
+palettes:
+  - # A: black bg, cream fill, thick red hard shadow
+    bg: [10, 10, 10]
+    fill: [242, 237, 228]
+    shadow: [196, 30, 58]
+    accent: [242, 237, 228]
+    border: [242, 237, 228]
+    rule: [242, 237, 228]
+    stamp_bg: [196, 30, 58]
+    stamp_fg: [10, 10, 10]
+    label: [242, 237, 228]
+  - # B: cream/paper bg, crimson fill, black hard shadow
+    bg: [242, 232, 216]
+    fill: [196, 30, 58]
+    shadow: [17, 17, 17]
+    accent: [196, 30, 58]
+    border: [196, 30, 58]
+    rule: [196, 30, 58]
+    stamp_bg: [17, 17, 17]
+    stamp_fg: [242, 237, 228]
+    label: [196, 30, 58]
+  - # C: crimson bg, cream fill, black hard shadow
+    bg: [196, 30, 58]
+    fill: [242, 237, 228]
+    shadow: [17, 17, 17]
+    accent: [242, 237, 228]
+    border: [242, 237, 228]
+    rule: [242, 237, 228]
+    stamp_bg: [17, 17, 17]
+    stamp_fg: [242, 237, 228]
+    label: [242, 237, 228]
+# Fallbacks for non-palette paths (match A / B)
+verse:
+  fill: [242, 237, 228, 255]
+  shadow: [196, 30, 58, 255]
+  accent: [242, 237, 228, 255]
+  box: [10, 10, 10, 0]
+chorus:
+  fill: [196, 30, 58, 255]
+  shadow: [17, 17, 17, 255]
+  accent: [196, 30, 58, 255]
+  box: [242, 232, 216, 0]
+hook:
+  fill: [242, 237, 228, 255]
+  shadow: [17, 17, 17, 255]
+  accent: [242, 237, 228, 255]
+  box: [196, 30, 58, 0]
+hook_keywords: [人海孤岛, 越热闹越寂寞, 只有我安静得像被掏空]
+chorus_keywords: [人海孤岛, 越热闹, 越寂寞, 人潮汹涌, 合群汹涌]

@@ -15,6 +15,7 @@ Vertical kinetic **dazibao** lyric MV CLI — punchy CJK typography over a poste
 | **dazibao-ivory** — 象牙字 + 深红钩 | [preview](examples/samples/preview-dazibao-ivory.jpg) | [30s mp4](examples/samples/style-dazibao-ivory-30s.mp4) |
 | **laodeng-brick** — 暖金字 + 砖红钩 | [preview](examples/samples/preview-laodeng-brick.jpg) | [30s mp4](examples/samples/style-laodeng-brick-30s.mp4) |
 | **mono-poster** — 黑白海报 / 反相钩 | [preview](examples/samples/preview-mono-poster.jpg) | [30s mp4](examples/samples/style-mono-poster-30s.mp4) |
+| **poster-wall** — 大字报铺满 / 交替底色 | — | — |
 
 GitHub（需有仓库权限）直链：
 
@@ -116,6 +117,7 @@ Builtins:
 1. **dazibao-ivory** — ivory type, teal-gray shadow, crimson hook smash
 2. **laodeng-brick** — warm gold type, brick-red smash
 3. **mono-poster** — stark B/W; white bars / inverted hook
+4. **poster-wall** — dazibao poster-fill: glyphs auto-fit to fill the screen (horizontal or vertical), **hard block shadow** (not soft chromatic layers), double border + rules + stamp「大字报」, and **alternating solid palettes** per line (black/cream/crimson). `--bg-color` / `--bg` / `--bg-generate` are ignored; palettes win. Gaps use matte black.
 
 Custom:
 
@@ -124,6 +126,22 @@ dazibao-mv render ... --style-file examples/style_custom.yaml
 ```
 
 Each style YAML defines `verse` / `chorus` / `hook` RGBA colors, `font`, `hook_keywords`, `chorus_keywords`.
+
+#### poster-wall / `mode: poster_fill`
+
+```yaml
+mode: poster_fill
+decor: true
+shadow_offset: [18, 18]
+palettes:
+  - {bg: [10,10,10], fill: [242,237,228], shadow: [196,30,58], ...}   # A black/cream/red
+  - {bg: [242,232,216], fill: [196,30,58], shadow: [17,17,17], ...}  # B paper/crimson
+  - {bg: [196,30,58], fill: [242,237,228], shadow: [17,17,17], ...}  # C crimson/cream
+```
+
+- Layouts: `poster_fill_h` (short lines ~≤6–8 chars) / `poster_fill_v` (longer), cycling for mid-length.
+- Each lyric line paints `palettes[i % n]` as a solid background, then decor, then hard-shadow text sized to ~88–94% of the frame.
+- Title card uses palette B (cream paper) with the same decor + fade.
 
 #### Other options
 
@@ -145,6 +163,7 @@ Each style YAML defines `verse` / `chorus` / `hook` RGBA colors, `font`, `hook_k
 - Layout index cycles **separately** for chorus/hook vs verse
 - Kinetic reveal uses `glyph_chunks` (per-char / 1–2 glyph pairs), not whole sentences; `REVEAL_FRAC=0.48`, `MAX_PER_CHAR=0.30`; punch newest only
 - Layouts auto-shrink so each full lyric line fits on one 9:16 frame
+- `poster_fill` styles alternate solid palette backgrounds per line and use hard block shadows + screen-fill layouts (`poster_fill_h` / `poster_fill_v`)
 
 ---
 
