@@ -63,3 +63,30 @@ def test_first_lyric_prefers_strong_post_intro_cue():
     aligned = match_lyrics_to_cues(lyrics, cues, max_chars=9, max_line_sec=5.5)
     assert 16.5 <= aligned[0]["start"] <= 18.0, aligned[0]
     assert aligned[0]["text"] == "霓虹把黑夜照得太红"
+
+
+def test_first_lyric_word_onset_skips_intro_bleed():
+    """Word timestamps: skip stretched intro glyphs → onset ~17.7s."""
+    lyrics = ["霓虹把黑夜照得太红", "笑声从四面八方失控"]
+    cues = [
+        {
+            "start": 12.34,
+            "end": 20.0,
+            "text": "霓虹把黑夜照得太红",
+            "words": [
+                {"start": 12.34, "end": 12.36, "word": "霓"},
+                {"start": 12.36, "end": 17.74, "word": "虹"},
+                {"start": 17.74, "end": 18.0, "word": "把"},
+                {"start": 18.0, "end": 18.34, "word": "黑"},
+                {"start": 18.34, "end": 18.5, "word": "夜"},
+                {"start": 18.5, "end": 18.76, "word": "照"},
+                {"start": 18.76, "end": 18.94, "word": "得"},
+                {"start": 18.94, "end": 19.5, "word": "太"},
+                {"start": 19.5, "end": 20.0, "word": "红"},
+            ],
+        },
+        {"start": 20.56, "end": 24.14, "text": "笑声从四面八方失控"},
+    ]
+    aligned = match_lyrics_to_cues(lyrics, cues, max_chars=9, max_line_sec=5.5)
+    assert 16.5 <= aligned[0]["start"] <= 18.0, aligned[0]
+    assert abs(aligned[0]["start"] - 17.74) < 0.05

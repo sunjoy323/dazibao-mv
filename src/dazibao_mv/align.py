@@ -141,7 +141,10 @@ def split_asr_cues(cues: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
         start, end = float(c["start"]), float(c["end"])
         parts = [p.strip() for p in _PUNCT_SPLIT.split(text) if p.strip()]
         if len(parts) <= 1:
-            out.append({"start": start, "end": end, "text": text})
+            item = {"start": start, "end": end, "text": text}
+            if c.get("words"):
+                item["words"] = list(c["words"])
+            out.append(item)
             continue
         weights = [max(1, len(_normalize(p)) or len(p)) for p in parts]
         total = sum(weights)
@@ -175,6 +178,39 @@ def redistribute_times(
     return out
 
 
+
+def first_lyric_onset_from_words(
+    cue: Dict[str, Any],
+    *,
+    max_word_dur: float = 1.5,
+) -> Optional[float]:
+    """Skip Whisper intro-bleed word timestamps; return real sung onset.
+
+    Faster-whisper often parks the first glyphs at the segment start with a
+    tiny duration, then stretches the next word across the instrumental gap.
+    Skip leading words with absurd duration (or micro+mega pairs) and use the
+    first remaining word start.
+    """
+    words = cue.get("words") or []
+    if len(words) < 2:
+        return None
+    i = 0
+    n = len(words)
+    while i < n - 1:
+        w = words[i]
+        dur = float(w["end"]) - float(w["start"])
+        nxt = words[i + 1]
+        nxt_dur = float(nxt["end"]) - float(nxt["start"])
+        if dur > max_word_dur or (dur < 0.08 and nxt_dur > max_word_dur):
+            i += 1
+            continue
+        break
+    onset = float(words[i]["start"])
+    # Only treat as a correction when we actually skipped bleed
+    if i == 0:
+        return None
+    return onset
+
 def match_lyrics_to_cues(
     lyrics: Sequence[str],
     cues: Sequence[Dict[str, Any]],
@@ -203,11 +239,17 @@ def match_lyrics_to_cues(
             if fj is not None:
                 best_j = fj
                 best_r = _cue_similarity(nt, cues[fj].get("text") or "")
-                # Overlong early blobs (intro bleed) → anchor to cue end near vocals.
+                # Overlong early blobs (intro bleed) → prefer word onset, else end-anchor.
                 st = float(cues[fj]["start"])
                 en = float(cues[fj]["end"])
                 expect = expected_line_dur(raw, max_sec=max_line_sec)
-                if (en - st) > expect + 0.8 and st < 15.0:
+                word_onset = first_lyric_onset_from_words(cues[fj])
+                if word_onset is not None and word_onset > st + 0.3:
+                    # Stash corrected start onto cue for cap/match below
+                    cues[fj] = dict(cues[fj])
+                    cues[fj]["start"] = word_onset
+                    anchor = "start"
+                elif (en - st) > expect + 0.8 and st < 15.0:
                     anchor = "end"
             else:
                 # fall back to normal window search from ai
@@ -292,8 +334,24 @@ def whisper_transcribe(
     cues: List[Dict[str, Any]] = []
     for seg in segments:
         text = (seg.text or "").strip()
-        if text:
-            cues.append({"start": float(seg.start), "end": float(seg.end), "text": text})
+        if not text:
+            continue
+        item: Dict[str, Any] = {
+            "start": float(seg.start),
+            "end": float(seg.end),
+            "text": text,
+        }
+        if getattr(seg, "words", None):
+            item["words"] = [
+                {
+                    "start": float(w.start),
+                    "end": float(w.end),
+                    "word": (w.word or "").strip(),
+                }
+                for w in seg.words
+                if w.word and str(w.word).strip()
+            ]
+        cues.append(item)
     return cues
 
 
