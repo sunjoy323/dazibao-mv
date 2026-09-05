@@ -6,6 +6,23 @@ Vertical kinetic **dazibao** lyric MV CLI — punchy CJK typography over a poste
 
 ---
 
+## 功能展示 Style demos（30s）
+
+同一首歌、同一纯色底，三种内置风格小样（逐字/双字轰出）。仓库内路径可直接点开：
+
+| Style | Preview | Video |
+|-------|---------|-------|
+| **dazibao-ivory** — 象牙字 + 深红钩 | [preview](examples/samples/preview-dazibao-ivory.jpg) | [30s mp4](examples/samples/style-dazibao-ivory-30s.mp4) |
+| **laodeng-brick** — 暖金字 + 砖红钩 | [preview](examples/samples/preview-laodeng-brick.jpg) | [30s mp4](examples/samples/style-laodeng-brick-30s.mp4) |
+| **mono-poster** — 黑白海报 / 反相钩 | [preview](examples/samples/preview-mono-poster.jpg) | [30s mp4](examples/samples/style-mono-poster-30s.mp4) |
+
+GitHub（需有仓库权限）直链：
+
+- Ivory: https://github.com/sunjoy323/dazibao-mv/blob/main/examples/samples/style-dazibao-ivory-30s.mp4
+- Brick: https://github.com/sunjoy323/dazibao-mv/blob/main/examples/samples/style-laodeng-brick-30s.mp4
+- Mono: https://github.com/sunjoy323/dazibao-mv/blob/main/examples/samples/style-mono-poster-30s.mp4
+
+
 ## 依赖 Requirements
 
 - **Python** ≥ 3.10
@@ -85,9 +102,9 @@ size: "1024x1792"
 
 Builtins:
 
-1. **dazibao-ivory** — ivory fills, deep ink shadows, crimson hook box
-2. **laodeng-brick** — warm amber / brick hooks
-3. **mono-poster** — white/black high contrast
+1. **dazibao-ivory** — ivory type, teal-gray shadow, crimson hook smash
+2. **laodeng-brick** — warm gold type, brick-red smash
+3. **mono-poster** — stark B/W; white bars / inverted hook
 
 Custom:
 
@@ -113,7 +130,8 @@ Each style YAML defines `verse` / `chorus` / `hook` RGBA colors, `font`, `hook_k
 
 - Line clips in the ffmpeg concat **never overlap** (`t0 = max(prev_t1, start - LEAD)`)
 - Layout index cycles **separately** for chorus/hook vs verse
-- Kinetic reveal: `REVEAL_FRAC=0.48`, `MAX_PER_CHAR=0.30`; punch applies to newest chunk only
+- Kinetic reveal uses `glyph_chunks` (per-char / 1–2 glyph pairs), not whole sentences; `REVEAL_FRAC=0.48`, `MAX_PER_CHAR=0.30`; punch newest only
+- Layouts auto-shrink so each full lyric line fits on one 9:16 frame
 
 ---
 

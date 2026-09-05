@@ -18,6 +18,8 @@ venv/
 *.jpeg
 *.png
 !examples/**
+!examples/samples/
+!examples/samples/**
 .DS_Store
 work/
 out/
