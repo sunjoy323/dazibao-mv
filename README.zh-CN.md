@@ -8,7 +8,7 @@
 
 ## 风格小样（30 秒）
 
-同一首歌、纯色底，内置风格预览（逐字 / 双字轰出）。仓库内路径可直接打开：
+同一首歌、纯色底。**8 种内置风格**——各自有**独立动效语言**（布局 + 冲击曲线），不只是换色。逐字 / 双字轰出。仓库内路径可直接打开：
 
 | 风格 | 预览图 | 视频 |
 |------|--------|------|
@@ -30,6 +30,7 @@ GitHub 直链（需仓库权限）：
 - Blueprint: https://github.com/sunjoy323/dazibao-mv/blob/main/examples/samples/style-blueprint-30s.mp4
 - Comic: https://github.com/sunjoy323/dazibao-mv/blob/main/examples/samples/style-pop-comic-30s.mp4
 - Ink: https://github.com/sunjoy323/dazibao-mv/blob/main/examples/samples/style-ink-wash-30s.mp4
+- poster-wall：样片待补（sample TBD）
 
 ---
 
@@ -142,7 +143,13 @@ dazibao-mv render \
 1. **dazibao-ivory** — 象牙字、青灰阴影、深红钩击  
 2. **laodeng-brick** — 暖金字、砖红钩击  
 3. **mono-poster** — 强烈黑白；白条 / 反相钩  
-4. **poster-wall** — 铺满屏大字报：硬块阴影、装饰与印章「大字报」、**按行交替纯色色板**。忽略 `--bg*`。
+4. **poster-wall** — 铺满屏大字报：硬块阴影、装饰与印章「大字报」、**按行交替纯色色板**。忽略 `--bg*`。  
+5. **neon-cyber** — 边缘霓虹柱 / 故障冲击；铺满屏；间隙保留上一句  
+6. **blueprint** — 制图标题栏 / 横竖尺 / 角标；滑入显现（无弹跳）；低透明度保持  
+7. **pop-comic** — 分镜框 / 斜切条 / 叠层爆裂重击；铺满屏；间隙保持  
+8. **ink-wash** — 竖行书法 / 双栏 / 印章；柔和放大；纸面留白；保持溶解  
+
+动效风格（**neon-cyber**、**blueprint**、**pop-comic**、**ink-wash**）在 YAML 中自行声明 `layouts` / `punch` / `gap_mode`。相邻行不复用同一布局（仅当一句歌词被拆分时最多连续 2 次）；绝不连续 3 次相同；句间间隙默认 hold（无黑闪）。
 
 自定义风格：
 
@@ -150,7 +157,7 @@ dazibao-mv render \
 dazibao-mv render ... --style-file examples/style_custom.yaml
 ```
 
-每个风格 YAML 定义 `verse` / `chorus` / `hook` 的 RGBA、`font`、`hook_keywords`、`chorus_keywords`。poster-wall 另含 `mode: poster_fill` 与 `palettes`。
+每个风格 YAML 定义 `verse` / `chorus` / `hook` 的 RGBA、`font`、`hook_keywords`、`chorus_keywords`。自定义风格还可包含 `layouts`、`punch`、`gap_mode`、`fill`、`reveal_frac` 等。**poster-wall** 仍使用 `mode: poster_fill` + `palettes`。
 
 #### 常用渲染参数
 
@@ -204,7 +211,7 @@ dazibao-mv serve --host 0.0.0.0 --port 8765
 
 1. 选择音频（MP3 / WAV 等）。  
 2. 粘贴歌词，或上传 `.txt` / `.lrc` / `.srt`。  
-3. 选择风格（象牙 / 砖红 / 黑白 / 海报墙），可选自定义颜色、字体、标题/作者、间隙模式、Whisper 型号、lite、分辨率。  
+3. 选择风格（象牙 / 砖红 / 黑白 / 海报墙 / neon-cyber / blueprint / pop-comic / ink-wash），可选自定义颜色、字体、标题/作者、间隙模式、Whisper 型号、lite、分辨率。  
 4. 提交 → 轮询任务状态 → 预览视频 → 下载 master（及可选 lite）。
 
 ### 带时间轴的歌词 → 跳过对齐
@@ -250,7 +257,10 @@ docker compose up --build
 - 布局自动缩小，保证整句落在单个 9:16 画面内。  
 - 句间间隙默认 **hold** 上一画面（`--gap-mode hold`）；`black` 恢复黑场。  
 - 有 `--title` 时，片头持续到**首句前 1 秒**，再 **fade**（`--title-fade`，默认 0.8s）。  
-- **poster-wall** / `poster_fill`：交替纯色底 + 硬块阴影 + 铺满布局（`poster_fill_h` / `poster_fill_v`）。
+- **poster-wall** / `poster_fill`：交替纯色底 + 硬块阴影 + 铺满布局（`poster_fill_h` / `poster_fill_v`）。  
+- 内置动效风格（**neon-cyber**、**blueprint**、**pop-comic**、**ink-wash**）各自使用私有布局池 + 冲击曲线；防重复分配（除非 `split_group`，否则相邻不复用同一布局；绝不连续 3 次相同）。  
+- 上述风格默认 `--gap-mode hold`（曲中无黑场）；CLI 仍可强制 `black`/`flash`。  
+- Neon / blueprint / comic 追求约 90%+ 铺满屏；ink-wash 保留更平静的纸面留白。
 
 ---
 

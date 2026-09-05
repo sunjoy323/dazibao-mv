@@ -8,7 +8,7 @@ Vertical kinetic **dazibao** lyric MV — punchy CJK typography over a poster ba
 
 ## Style demos（30s）
 
-Same song, solid background, builtin styles (glyph / digraph punch). Paths in-repo:
+Same song, solid background. **8 builtin styles** — each with a **distinct motion language** (layouts + punch), not just colors. Glyph / digraph punch. Paths in-repo:
 
 | Style | Preview | Video |
 |-------|---------|-------|
@@ -20,6 +20,17 @@ Same song, solid background, builtin styles (glyph / digraph punch). Paths in-re
 | **blueprint** — drafting-grid measured reveal (titleblock / H·V rules) | [preview](examples/samples/preview-blueprint.jpg) | [30s mp4](examples/samples/style-blueprint-30s.mp4) |
 | **pop-comic** — panel-smash / diagonal banner / slam burst | [preview](examples/samples/preview-pop-comic.jpg) | [30s mp4](examples/samples/style-pop-comic-30s.mp4) |
 | **ink-wash** — vertical calligraphy scroll + soft grow / dissolve | [preview](examples/samples/preview-ink-wash.jpg) | [30s mp4](examples/samples/style-ink-wash-30s.mp4) |
+
+GitHub blob links (needs repo access):
+
+- Ivory: https://github.com/sunjoy323/dazibao-mv/blob/main/examples/samples/style-dazibao-ivory-30s.mp4
+- Brick: https://github.com/sunjoy323/dazibao-mv/blob/main/examples/samples/style-laodeng-brick-30s.mp4
+- Mono: https://github.com/sunjoy323/dazibao-mv/blob/main/examples/samples/style-mono-poster-30s.mp4
+- Neon: https://github.com/sunjoy323/dazibao-mv/blob/main/examples/samples/style-neon-cyber-30s.mp4
+- Blueprint: https://github.com/sunjoy323/dazibao-mv/blob/main/examples/samples/style-blueprint-30s.mp4
+- Comic: https://github.com/sunjoy323/dazibao-mv/blob/main/examples/samples/style-pop-comic-30s.mp4
+- Ink: https://github.com/sunjoy323/dazibao-mv/blob/main/examples/samples/style-ink-wash-30s.mp4
+- poster-wall: sample TBD
 
 ---
 
@@ -132,13 +143,21 @@ See `examples/config.imagegen.yaml` for an image-gen config example.
 1. **dazibao-ivory** — ivory type, teal-gray shadow, crimson hook smash  
 2. **laodeng-brick** — warm gold type, brick-red smash  
 3. **mono-poster** — stark B/W; white bars / inverted hook  
-4. **poster-wall** — poster-fill: glyphs auto-fit the screen, hard block shadow, decor + stamp「大字报」, **alternating solid palettes** per line. `--bg*` flags are ignored.
+4. **poster-wall** — poster-fill: glyphs auto-fit the screen, hard block shadow, decor + stamp「大字报」, **alternating solid palettes** per line. `--bg*` flags are ignored.  
+5. **neon-cyber** — edge neon columns / glitch punch; screen-filling; gaps hold previous line  
+6. **blueprint** — drafting titleblock / H·V rules / corner; slide reveal (no bounce); hold at low opacity  
+7. **pop-comic** — comic panel / slash / stack-burst slam; screen-filling; gaps hold  
+8. **ink-wash** — vertical calligraphy / two-col / seal; soft grow; paper margins; hold dissolve  
+
+Motion styles (**neon-cyber**, **blueprint**, **pop-comic**, **ink-wash**) declare their own `layouts` / `punch` / `gap_mode` in YAML. Adjacent lines never reuse the same layout (max 2 only when one lyric is split); never 3 identical in a row; mid gaps hold (no black flash by default).
 
 Custom style file:
 
 ```bash
 dazibao-mv render ... --style-file examples/style_custom.yaml
 ```
+
+Each style YAML defines `verse` / `chorus` / `hook` RGBA, `font`, `hook_keywords`, `chorus_keywords`. Custom styles may also include `layouts`, `punch`, `gap_mode`, `fill`, `reveal_frac`, etc. **poster-wall** still uses `mode: poster_fill` + `palettes`.
 
 #### Important render flags
 
@@ -176,7 +195,7 @@ Open **http://127.0.0.1:8765/**.
 
 1. Choose an audio file (MP3 / WAV / …).  
 2. Paste lyrics **or** upload `.txt` / `.lrc` / `.srt`.  
-3. Pick a style (ivory / brick / mono / poster-wall), optional color overrides, font, title/author, gap-mode, Whisper model, lite, geometry.  
+3. Pick a style (ivory / brick / mono / poster-wall / neon-cyber / blueprint / pop-comic / ink-wash), optional color overrides, font, title/author, gap-mode, Whisper model, lite, geometry.  
 4. Submit → poll job status → watch preview → download master (and lite if enabled).
 
 ### Timestamped lyrics → skip Whisper
@@ -222,7 +241,10 @@ Stop with `Ctrl+C` or `docker compose down`.
 - Layouts auto-shrink so each full lyric fits one 9:16 frame.  
 - Gaps **hold** the previous lyric/title by default (`--gap-mode hold`); `black` restores solid matte.  
 - Title card (when `--title` is set) lasts until **1s before first lyric**, then **fades** (`--title-fade`, default 0.8s).  
-- `poster_fill` / **poster-wall**: alternating solid palette backgrounds; hard block shadows; screen-fill layouts (`poster_fill_h` / `poster_fill_v`).
+- `poster_fill` / **poster-wall**: alternating solid palette backgrounds; hard block shadows; screen-fill layouts (`poster_fill_h` / `poster_fill_v`).  
+- Builtin motion styles (**neon-cyber**, **blueprint**, **pop-comic**, **ink-wash**) each use a private layout pool + punch curve; anti-repeat assignment (no consecutive same layout unless `split_group`; never 3 in a row).  
+- Those styles default to `--gap-mode hold` (no mid-song black); CLI can still force `black`/`flash`.  
+- Neon / blueprint / comic aim ~90%+ screen fill; ink-wash keeps calmer paper margins.
 
 ---
 
