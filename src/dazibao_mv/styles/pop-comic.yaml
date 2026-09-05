@@ -1,10 +1,19 @@
 name: pop-comic
-description: Lemon comic punch — thick black outline, flat primary fill, burst
+description: Panel-smash / diagonal banner / burst slam — lemon comic motion language
 mode: comic
 decor: true
 bg: [255, 236, 60]
 shadow_offset: [0, 0]
 font: /usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc
+layouts: [comic_panel_full, comic_slash, comic_stack_burst, giant_char]
+punch:
+  kind: slam
+  amount: 2.2
+gap_mode: flash
+fill: panel
+flash_color: [255, 255, 255]
+reveal_frac: 0.40
+max_per_char: 0.24
 verse:
   fill: [30, 90, 220, 255]
   shadow: [10, 10, 10, 255]

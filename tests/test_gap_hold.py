@@ -120,9 +120,14 @@ def test_gap_mode_cli_default():
     args = p.parse_args([
         "render", "--audio", "a.mp3", "--lyrics", "l.txt", "--out", "o.mp4",
     ])
-    assert args.gap_mode == "hold"
+    assert args.gap_mode == "auto"
     args_b = p.parse_args([
         "render", "--audio", "a.mp3", "--lyrics", "l.txt", "--out", "o.mp4",
         "--gap-mode", "black",
     ])
     assert args_b.gap_mode == "black"
+    args_f = p.parse_args([
+        "render", "--audio", "a.mp3", "--lyrics", "l.txt", "--out", "o.mp4",
+        "--gap-mode", "flash",
+    ])
+    assert args_f.gap_mode == "flash"

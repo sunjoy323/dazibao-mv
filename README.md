@@ -16,10 +16,10 @@ Same song, solid background, builtin styles (glyph / digraph punch). Paths in-re
 | **laodeng-brick** — warm gold + brick hook | [preview](examples/samples/preview-laodeng-brick.jpg) | [30s mp4](examples/samples/style-laodeng-brick-30s.mp4) |
 | **mono-poster** — B/W poster / inverted hook | [preview](examples/samples/preview-mono-poster.jpg) | [30s mp4](examples/samples/style-mono-poster-30s.mp4) |
 | **poster-wall** — full-screen dazibao / alternating palettes | — | — |
-| **neon-cyber** — near-black + cyan/magenta glow + scanlines | [preview](examples/samples/preview-neon-cyber.jpg) | [30s mp4](examples/samples/style-neon-cyber-30s.mp4) |
-| **blueprint** — deep blueprint blue + grid / crosshair | [preview](examples/samples/preview-blueprint.jpg) | [30s mp4](examples/samples/style-blueprint-30s.mp4) |
-| **pop-comic** — lemon comic punch + thick outline / burst | [preview](examples/samples/preview-pop-comic.jpg) | [30s mp4](examples/samples/style-pop-comic-30s.mp4) |
-| **ink-wash** — rice-paper + soft ink shadow | [preview](examples/samples/preview-ink-wash.jpg) | [30s mp4](examples/samples/style-ink-wash-30s.mp4) |
+| **neon-cyber** — strobe edge-columns + glitch punch (cyan/magenta neon) | [preview](examples/samples/preview-neon-cyber.jpg) | [30s mp4](examples/samples/style-neon-cyber-30s.mp4) |
+| **blueprint** — drafting-grid measured reveal (titleblock / H·V rules) | [preview](examples/samples/preview-blueprint.jpg) | [30s mp4](examples/samples/style-blueprint-30s.mp4) |
+| **pop-comic** — panel-smash / diagonal banner / slam burst | [preview](examples/samples/preview-pop-comic.jpg) | [30s mp4](examples/samples/style-pop-comic-30s.mp4) |
+| **ink-wash** — vertical calligraphy scroll + soft grow / dissolve | [preview](examples/samples/preview-ink-wash.jpg) | [30s mp4](examples/samples/style-ink-wash-30s.mp4) |
 
 ---
 
@@ -151,7 +151,7 @@ dazibao-mv render ... --style-file examples/style_custom.yaml
 | `--srt` | — | Skip Whisper |
 | `--max-chars` | `9` | Max chars per display line |
 | `--lead` | `0.12` | Early punch; clamped so clips never overlap |
-| `--gap-mode` | `hold` | `hold` previous visual or `black` matte |
+| `--gap-mode` | `auto` | `auto` (style default), `hold`, `black`/`cut`, or `flash` |
 | `--lite` | off | Also write `*-lite.mp4` (~1600k video) |
 | `--width` / `--height` / `--fps` | `1080` / `1920` / `24` | Output geometry |
 | `--whisper-model` | `medium` | Used when no `--srt` |

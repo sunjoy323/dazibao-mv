@@ -1,10 +1,18 @@
 name: ink-wash
-description: Rice-paper calm — deep ink type with soft smudged shadow
+description: Vertical calligraphy scroll — soft grow / dissolve hold (paper margins)
 mode: ink
 decor: false
 bg: [232, 226, 214]
 shadow_offset: [6, 8]
 font: /usr/share/fonts/opentype/noto/NotoSerifCJK-Bold.ttc
+layouts: [ink_vertical, ink_two_col, ink_seal]
+punch:
+  kind: soft
+  amount: 1.12
+gap_mode: hold
+fill: paper
+reveal_frac: 0.65
+max_per_char: 0.40
 verse:
   fill: [18, 16, 14, 255]
   shadow: [40, 36, 32, 90]

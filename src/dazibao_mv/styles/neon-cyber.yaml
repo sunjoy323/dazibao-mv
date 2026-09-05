@@ -1,10 +1,19 @@
 name: neon-cyber
-description: Near-black nightclub — electric cyan/magenta glow type + scanlines
+description: Strobe edge-columns + glitch punch — cyan/magenta neon (not just a color swap)
 mode: neon
 decor: true
 bg: [6, 8, 14]
 shadow_offset: [0, 0]
 font: /usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc
+layouts: [neon_col_left, neon_col_right, neon_stack_center, giant_char]
+punch:
+  kind: glitch
+  amount: 1.55
+  glitch_px: 12
+gap_mode: flash
+fill: edge
+reveal_frac: 0.45
+max_per_char: 0.26
 verse:
   fill: [180, 255, 250, 255]
   shadow: [0, 220, 255, 180]

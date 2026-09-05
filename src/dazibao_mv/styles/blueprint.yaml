@@ -1,10 +1,19 @@
 name: blueprint
-description: Deep blueprint blue — white/cyan drafting type, grid + crosshair
+description: Drafting-grid measured reveal — titleblock / H-V rules / corners (motion ≠ color)
 mode: blueprint
 decor: true
 bg: [12, 52, 110]
 shadow_offset: [2, 2]
 font: /usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc
+layouts: [blueprint_titleblock, blueprint_h_rule, blueprint_v_rule, blueprint_corner]
+punch:
+  kind: slide
+  amount: 1.0
+gap_mode: hold
+fill: grid
+hold_opacity: 0.30
+reveal_frac: 0.55
+max_per_char: 0.32
 verse:
   fill: [220, 240, 255, 255]
   shadow: [80, 160, 220, 160]

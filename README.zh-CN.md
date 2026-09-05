@@ -16,10 +16,10 @@
 | **laodeng-brick** — 暖金字 + 砖红钩 | [preview](examples/samples/preview-laodeng-brick.jpg) | [30s mp4](examples/samples/style-laodeng-brick-30s.mp4) |
 | **mono-poster** — 黑白海报 / 反相钩 | [preview](examples/samples/preview-mono-poster.jpg) | [30s mp4](examples/samples/style-mono-poster-30s.mp4) |
 | **poster-wall** — 大字报铺满 / 交替色板 | — | — |
-| **neon-cyber** — 近黑底 + 青/品红霓虹光晕 + 扫描线 | [preview](examples/samples/preview-neon-cyber.jpg) | [30s mp4](examples/samples/style-neon-cyber-30s.mp4) |
-| **blueprint** — 深蓝蓝图底 + 网格 / 准星 | [preview](examples/samples/preview-blueprint.jpg) | [30s mp4](examples/samples/style-blueprint-30s.mp4) |
-| **pop-comic** — 柠檬黄漫画冲撞 + 粗描边 / 爆裂 | [preview](examples/samples/preview-pop-comic.jpg) | [30s mp4](examples/samples/style-pop-comic-30s.mp4) |
-| **ink-wash** — 宣纸暖灰 + 柔墨阴影 | [preview](examples/samples/preview-ink-wash.jpg) | [30s mp4](examples/samples/style-ink-wash-30s.mp4) |
+| **neon-cyber** — 边缘闪柱 + 故障冲击（青/品红霓虹动效） | [preview](examples/samples/preview-neon-cyber.jpg) | [30s mp4](examples/samples/style-neon-cyber-30s.mp4) |
+| **blueprint** — 制图网格量测显现（标题栏 / 横竖尺） | [preview](examples/samples/preview-blueprint.jpg) | [30s mp4](examples/samples/style-blueprint-30s.mp4) |
+| **pop-comic** — 分镜砸入 / 斜条幅 / 爆裂重击 | [preview](examples/samples/preview-pop-comic.jpg) | [30s mp4](examples/samples/style-pop-comic-30s.mp4) |
+| **ink-wash** — 竖行书法卷轴 + 轻柔放大 / 溶解过渡 | [preview](examples/samples/preview-ink-wash.jpg) | [30s mp4](examples/samples/style-ink-wash-30s.mp4) |
 
 GitHub 直链（需仓库权限）：
 
@@ -163,7 +163,7 @@ dazibao-mv render ... --style-file examples/style_custom.yaml
 | `--srt` | — | 跳过 Whisper |
 | `--max-chars` | `9` | 单屏行字数上限 |
 | `--lead` | `0.12` | 提前轰出；钳制保证片段不重叠 |
-| `--gap-mode` | `hold` | `hold` 保持上一画面，或 `black` 黑场 |
+| `--gap-mode` | `auto` | `auto`（跟风格）、`hold`、`black`/`cut`、或 `flash` |
 | `--lite` | 关 | 额外输出 `*-lite.mp4`（约 1600k 视频） |
 | `--width` / `--height` / `--fps` | `1080` / `1920` / `24` | 输出几何 |
 | `--whisper-model` | `medium` | 无 `--srt` 时使用 |

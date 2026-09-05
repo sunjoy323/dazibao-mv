@@ -52,6 +52,40 @@ POSTER_LAYOUTS = [
     "poster_fill_v",
 ]
 
+# Per-mode layout pools (used when style.layouts is unset)
+NEON_LAYOUTS = [
+    "neon_col_left",
+    "neon_col_right",
+    "neon_stack_center",
+    "giant_char",
+]
+BLUEPRINT_LAYOUTS = [
+    "blueprint_titleblock",
+    "blueprint_h_rule",
+    "blueprint_v_rule",
+    "blueprint_corner",
+]
+COMIC_LAYOUTS = [
+    "comic_panel_full",
+    "comic_slash",
+    "comic_stack_burst",
+    "giant_char",
+]
+INK_LAYOUTS = [
+    "ink_vertical",
+    "ink_two_col",
+    "ink_seal",
+]
+
+MODE_LAYOUTS = {
+    "neon": NEON_LAYOUTS,
+    "blueprint": BLUEPRINT_LAYOUTS,
+    "comic": COMIC_LAYOUTS,
+    "ink": INK_LAYOUTS,
+    "ink_wash": INK_LAYOUTS,
+    "ink-wash": INK_LAYOUTS,
+}
+
 REVEAL_FRAC = 0.48
 MAX_PER_CHAR = 0.30
 
@@ -136,6 +170,34 @@ def assign_poster_layouts(lines: Sequence[TimedLine]) -> None:
             L.layout = "poster_fill_v"
         else:
             L.layout = POSTER_LAYOUTS[i % 2]
+
+
+
+def layouts_for_style(style: Dict[str, Any]) -> List[str]:
+    """Explicit style.layouts, else mode default pool, else classic LAYOUTS."""
+    explicit = style.get("layouts")
+    if isinstance(explicit, (list, tuple)) and explicit:
+        return [str(x) for x in explicit]
+    mode = str(style.get("mode") or "").strip().lower()
+    if mode in MODE_LAYOUTS:
+        return list(MODE_LAYOUTS[mode])
+    return list(LAYOUTS)
+
+
+def assign_style_layouts(lines: Sequence[TimedLine], style: Dict[str, Any]) -> None:
+    """Assign layouts from style/mode pool (never default LAYOUTS for styled modes).
+
+    Comic: force giant_char for ≤2-char hooks.
+    """
+    layouts = layouts_for_style(style)
+    assign_layouts(lines, layouts)
+    mode = str(style.get("mode") or "").strip().lower()
+    if mode == "comic":
+        ideographic = "　"
+        for L in lines:
+            nchar = len(L.text.replace(" ", "").replace(ideographic, ""))
+            if nchar <= 2 and (L.hook or L.chorus):
+                L.layout = "giant_char"
 
 
 def assign_chunk_times(

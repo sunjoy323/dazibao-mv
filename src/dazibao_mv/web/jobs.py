@@ -221,7 +221,7 @@ class JobManager:
                 width=int(opts.get("width") or 1080),
                 height=int(opts.get("height") or 1920),
                 fps=int(opts.get("fps") or 24),
-                gap_mode=str(opts.get("gap_mode") or "hold"),
+                gap_mode=str(opts.get("gap_mode") or "auto"),
             )
             self._update(job, status="done", message="done")
         except Exception as e:

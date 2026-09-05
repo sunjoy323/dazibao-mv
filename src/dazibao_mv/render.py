@@ -29,12 +29,72 @@ from .timeline import (
     assign_chunk_times,
     assign_layouts,
     assign_poster_layouts,
+    assign_style_layouts,
     build_concat_list,
     clamp_timeline,
+    layouts_for_style,
 )
 
 REVEAL_FRAC = 0.48
 MAX_PER_CHAR = 0.30
+
+
+def compute_punch_state(t_local: float, style: Dict[str, Any]) -> Tuple[float, str, Dict[str, Any]]:
+    """Return (scale, kind, extras) for the newest glyph.
+
+    kinds: scale (default), glitch, slide, slam, soft
+    extras may include glitch_ox, slide (0..1 remaining).
+    """
+    cfg = style.get("punch") or {}
+    kind = str(cfg.get("kind") or "scale").strip().lower()
+    try:
+        amount = float(cfg.get("amount", 1.32))
+    except (TypeError, ValueError):
+        amount = 1.32
+    try:
+        glitch_px = int(cfg.get("glitch_px", 12))
+    except (TypeError, ValueError):
+        glitch_px = 12
+    t = max(0.0, float(t_local))
+    extras: Dict[str, Any] = {}
+
+    if kind == "slide":
+        # No bounce scale; slide progress 1→0 (~0.2s)
+        extras["slide"] = max(0.0, 1.0 - t * 6.0)
+        return 1.0, kind, extras
+    if kind == "slam":
+        # 2.2 → 1.0 in ~3–4 frames @24fps
+        decay = max(0.0, 1.0 - t / 0.14)
+        return 1.0 + (amount - 1.0) * decay, kind, extras
+    if kind == "glitch":
+        decay = max(0.0, 1.0 - t * 20.0)
+        scale = 1.0 + (amount - 1.0) * decay
+        # ~1-frame horizontal glitch on newest glyph
+        if t < (1.0 / 24.0):
+            extras["glitch_ox"] = glitch_px if (int(t * 48) % 2 == 0) else -glitch_px
+        else:
+            extras["glitch_ox"] = 0
+        return scale, kind, extras
+    if kind == "soft":
+        decay = max(0.0, 1.0 - t * 5.0)
+        return 1.0 + (amount - 1.0) * decay, kind, extras
+    # scale (classic ivory/poster): 1.0 + 0.32 * decay
+    overshoot = (amount - 1.0) if amount > 1.0 else 0.32
+    decay = max(0.0, 1.0 - t * 12.0)
+    return 1.0 + overshoot * decay, "scale", extras
+
+
+def resolve_gap_mode(style: Dict[str, Any], gap_mode: Optional[str] = None) -> str:
+    """CLI/explicit wins; else style.gap_mode; else hold. cut→black."""
+    raw = (gap_mode if gap_mode not in (None, "", "auto") else None)
+    if raw is None:
+        raw = style.get("gap_mode") or "hold"
+    g = str(raw).lower().strip()
+    if g == "cut":
+        g = "black"
+    if g not in ("hold", "black", "flash"):
+        g = "hold"
+    return g
 
 
 def _require_ffmpeg() -> str:
@@ -533,7 +593,9 @@ def draw_layout(
     verse_accent = color_tuple(style, "verse", "accent")
 
     n = len(chunks_visible)
-    punch = 1.0 + 0.32 * max(0.0, 1.0 - t_local * 12)
+    punch, punch_kind, punch_extras = compute_punch_state(t_local, style)
+    glitch_ox = int(punch_extras.get("glitch_ox") or 0)
+    slide_rem = float(punch_extras.get("slide") or 0.0)
     nchar = max(1, len(shown.replace(" ", "")))
     sc_all = size_scale_for(nchar)
     shadow_off = tuple(style.get("shadow_offset") or (18, 18))
@@ -549,22 +611,43 @@ def draw_layout(
         return _font(font_path, max(24, int(base_size * sc_all * sc)))
 
     def put_text(d, xy, text, font, is_new=False, target=None,
-                  fill_=None, shadow_=None, accent_=None):
+                  fill_=None, shadow_=None, accent_=None, ox=0, oy=0):
         nonlocal draw, overlay
         tgt = target if target is not None else overlay
         fl = fill_ if fill_ is not None else fill
         sh = shadow_ if shadow_ is not None else shadow
         ac = accent_ if accent_ is not None else accent
+        x0, y0 = xy
+        # Neon glitch offset on newest glyph
+        if is_new and glitch_ox:
+            x0 += glitch_ox
+        x0 += int(ox)
+        y0 += int(oy)
         # Comic burst behind newest glyph
         if mode == "comic" and is_new and (decor or style.get("decor", True)):
-            bb = d.textbbox(xy, text, font=font)
+            bb = d.textbbox((x0, y0), text, font=font)
             cx = (bb[0] + bb[2]) / 2
             cy = (bb[1] + bb[3]) / 2
             rad = max(40, (bb[2] - bb[0]) * 0.85)
             burst_fill = (255, 255, 255, 200) if hook or chorus else (255, 250, 200, 190)
             draw_comic_burst(d, cx, cy, rad, fill=burst_fill, outline=sh)
+        # Neon dual ghost layers already in neon_glow_text; brief magenta/cyan offset
+        if mode == "neon" and is_new and punch > 1.05:
+            draw_styled_text(
+                tgt, d, (x0 - 6, y0), text, font,
+                _rgba(accent[:3], 90), sh, ac, style,
+                is_new=False, use_hard=False,
+            )
+            draw_styled_text(
+                tgt, d, (x0 + 6, y0), text, font,
+                _rgba(shadow[:3], 90), sh, ac, style,
+                is_new=False, use_hard=False,
+            )
+            if target is None:
+                draw = ImageDraw.Draw(overlay)
+                d = draw
         draw_styled_text(
-            tgt, d, xy, text, font, fl, sh, ac, style,
+            tgt, d, (x0, y0), text, font, fl, sh, ac, style,
             is_new=is_new, use_hard=use_hard and mode in ("", "poster_fill"),
         )
         # neon/ink mutate target; refresh draw handle when painting main overlay
@@ -747,6 +830,402 @@ def draw_layout(
             tw = bb[2] - bb[0]
             put_text(draw, (x, y - bb[1]), ch, f, is_new=(i == n - 1))
             x += tw + 8
+
+
+    elif layout == "neon_col_left" or layout == "neon_col_right" or layout == "neon_stack_center":
+        # Tall edge/center columns filling ~90% height — never small floating mid type
+        side = "left" if layout == "neon_col_left" else ("right" if layout == "neon_col_right" else "center")
+        target_h = int(H * 0.90)
+        margin_x = 40
+        base_size = int(H * 0.14)
+        while base_size >= 36:
+            total_h = 0
+            max_w = 0
+            for i, ch in enumerate(chunks_visible):
+                f = font_for(i, base_size)
+                bb = draw.textbbox((0, 0), ch, font=f)
+                total_h += (bb[3] - bb[1]) + 6
+                max_w = max(max_w, bb[2] - bb[0])
+            if total_h <= target_h and max_w <= W * 0.42:
+                break
+            base_size -= 6
+        fonts_bbs = []
+        total_h = 0
+        for i, ch in enumerate(chunks_visible):
+            f = font_for(i, base_size)
+            bb = draw.textbbox((0, 0), ch, font=f)
+            fonts_bbs.append((ch, f, bb))
+            total_h += (bb[3] - bb[1]) + 6
+        y = max(20, (H - total_h) // 2)
+        for i, (ch, f, bb) in enumerate(fonts_bbs):
+            tw, th = bb[2] - bb[0], bb[3] - bb[1]
+            if side == "left":
+                x = margin_x
+            elif side == "right":
+                x = W - margin_x - tw
+            else:
+                x = (W - tw) // 2
+            put_text(draw, (x, y - bb[1]), ch, f, is_new=(i == n - 1))
+            y += th + 6
+
+    elif layout == "blueprint_titleblock":
+        # Small caption top + large measured horizontal line
+        caption = f"LINE {(line_index % 99) + 1:02d}  /  SCALE 1:1"
+        cf = _font(font_path, 28)
+        draw.text((56, 48), caption, font=cf, fill=(180, 220, 255, 160))
+        # dimension ticks under caption
+        draw.line([(56, 88), (W - 56, 88)], fill=(160, 210, 255, 120), width=2)
+        for tx in range(56, W - 56, 48):
+            draw.line([(tx, 82), (tx, 94)], fill=(160, 210, 255, 140), width=1)
+        full = full_text or shown
+        f_base, bb_full = fit_font_size(draw, full, font_path, 160, W - 120, max_h=int(H * 0.22))
+        base_size = getattr(f_base, "size", 120)
+        settled = []
+        for i, ch in enumerate(chunks_visible):
+            f = _font(font_path, max(24, int(base_size * (punch if i == n - 1 else 1.0))))
+            # slide: constant size (punch already 1.0 for slide)
+            if punch_kind == "slide":
+                f = _font(font_path, base_size)
+            bb = draw.textbbox((0, 0), ch, font=f)
+            settled.append((ch, f, bb))
+        total_w = sum(bb[2] - bb[0] for _, _, bb in settled)
+        x = (W - total_w) // 2
+        y = int(H * 0.42)
+        for i, (ch, f, bb) in enumerate(settled):
+            tw = bb[2] - bb[0]
+            ox = int(slide_rem * 80) if (i == n - 1 and punch_kind == "slide") else 0
+            # thin white stroke via accent underdraw already in blueprint mode
+            put_text(draw, (x, y - bb[1]), ch, f, is_new=(i == n - 1), ox=-ox)
+            x += tw
+        # measure brackets
+        draw.line([(80, y + 90), (W - 80, y + 90)], fill=(200, 240, 255, 100), width=2)
+        draw.line([(80, y + 80), (80, y + 100)], fill=(200, 240, 255, 120), width=2)
+        draw.line([(W - 80, y + 80), (W - 80, y + 100)], fill=(200, 240, 255, 120), width=2)
+
+    elif layout == "blueprint_h_rule":
+        # Full-width horizontal on mid rule with tick marks; slide from left
+        cy = H // 2
+        draw.line([(40, cy), (W - 40, cy)], fill=(180, 220, 255, 160), width=3)
+        for tx in range(40, W - 40, 36):
+            h = 18 if (tx - 40) % 108 == 0 else 10
+            draw.line([(tx, cy - h), (tx, cy + h)], fill=(160, 210, 255, 140), width=1)
+        full = full_text or shown
+        f_base, _ = fit_font_size(draw, full, font_path, 140, W - 100, max_h=120)
+        base_size = getattr(f_base, "size", 100)
+        settled = []
+        for i, ch in enumerate(chunks_visible):
+            f = _font(font_path, base_size)
+            bb = draw.textbbox((0, 0), ch, font=f)
+            settled.append((ch, f, bb))
+        total_w = sum(bb[2] - bb[0] for _, _, bb in settled)
+        x = 60
+        # sit ON the rule
+        for i, (ch, f, bb) in enumerate(settled):
+            tw, th = bb[2] - bb[0], bb[3] - bb[1]
+            yi = cy - th // 2 - bb[1]
+            ox = int(slide_rem * min(W * 0.35, 200)) if (i == n - 1 and punch_kind == "slide") else 0
+            put_text(draw, (x, yi), ch, f, is_new=(i == n - 1), ox=-ox)
+            x += tw
+
+    elif layout == "blueprint_v_rule":
+        # Full-height vertical rule; slide from top
+        cx = W // 2
+        draw.line([(cx, 60), (cx, H - 60)], fill=(180, 220, 255, 160), width=3)
+        for ty in range(60, H - 60, 40):
+            w = 18 if (ty - 60) % 120 == 0 else 10
+            draw.line([(cx - w, ty), (cx + w, ty)], fill=(160, 210, 255, 140), width=1)
+        base_size = int(min(W, H) * 0.11)
+        while base_size >= 36:
+            total_h = 0
+            max_w = 0
+            for ch in chunks_visible:
+                f = _font(font_path, base_size)
+                bb = draw.textbbox((0, 0), ch, font=f)
+                total_h += (bb[3] - bb[1]) + 8
+                max_w = max(max_w, bb[2] - bb[0])
+            if total_h <= H - 160 and max_w <= W - 100:
+                break
+            base_size -= 6
+        total_h = 0
+        fonts_bbs = []
+        for ch in chunks_visible:
+            f = _font(font_path, base_size)
+            bb = draw.textbbox((0, 0), ch, font=f)
+            fonts_bbs.append((ch, f, bb))
+            total_h += (bb[3] - bb[1]) + 8
+        y = (H - total_h) // 2
+        for i, (ch, f, bb) in enumerate(fonts_bbs):
+            tw, th = bb[2] - bb[0], bb[3] - bb[1]
+            x = cx - tw // 2
+            oy = int(slide_rem * 120) if (i == n - 1 and punch_kind == "slide") else 0
+            put_text(draw, (x, y - bb[1]), ch, f, is_new=(i == n - 1), oy=-oy)
+            y += th + 8
+
+    elif layout == "blueprint_corner":
+        # Anchored bottom-left corner with dimension lines
+        draw.line([(48, H - 48), (W - 80, H - 48)], fill=(180, 220, 255, 130), width=2)
+        draw.line([(48, 80), (48, H - 48)], fill=(180, 220, 255, 130), width=2)
+        for tx in range(48, W - 80, 50):
+            draw.line([(tx, H - 56), (tx, H - 40)], fill=(160, 210, 255, 120), width=1)
+        for ty in range(80, H - 48, 50):
+            draw.line([(40, ty), (56, ty)], fill=(160, 210, 255, 120), width=1)
+        base_size = 150 if len(shown) <= 5 else 110
+        while base_size >= 40:
+            fonts_bbs = []
+            total_h = 0
+            max_w = 0
+            for i, ch in enumerate(chunks_visible):
+                f = font_for(i, base_size) if punch_kind != "slide" else _font(font_path, base_size)
+                bb = draw.textbbox((0, 0), ch, font=f)
+                fonts_bbs.append((ch, f, bb))
+                total_h += (bb[3] - bb[1]) + 10
+                max_w = max(max_w, bb[2] - bb[0])
+            if total_h <= H * 0.55 and max_w <= W * 0.7:
+                break
+            base_size -= 8
+        y = H - 80 - total_h
+        for i, (ch, f, bb) in enumerate(fonts_bbs):
+            tw, th = bb[2] - bb[0], bb[3] - bb[1]
+            x = 72
+            ox = int(slide_rem * 60) if (i == n - 1 and punch_kind == "slide") else 0
+            put_text(draw, (x, y - bb[1]), ch, f, is_new=(i == n - 1), ox=-ox)
+            y += th + 10
+
+    elif layout == "comic_panel_full":
+        # Thick black comic panel inset on yellow margin
+        m = 56
+        # panel fill slightly lighter yellow
+        draw.rectangle([m, m, W - m, H - m], fill=(255, 245, 120, 255))
+        draw.rectangle([m, m, W - m, H - m], outline=(10, 10, 10, 255), width=16)
+        # inner thin line
+        draw.rectangle([m + 22, m + 22, W - m - 22, H - m - 22], outline=(10, 10, 10, 255), width=4)
+        inner_w, inner_h = W - 2 * m - 60, H - 2 * m - 60
+        base_size = 200 if len(shown) <= 4 else (160 if len(shown) <= 8 else 120)
+        while base_size >= 40:
+            fonts_bbs = []
+            total_h = 0
+            max_w = 0
+            for i, ch in enumerate(chunks_visible):
+                f = font_for(i, base_size)
+                bb = draw.textbbox((0, 0), ch, font=f)
+                fonts_bbs.append((ch, f, bb))
+                total_h += (bb[3] - bb[1]) + 10
+                max_w = max(max_w, bb[2] - bb[0] + 20)
+            if total_h <= inner_h and max_w <= inner_w:
+                break
+            base_size -= 8
+        y = m + 40 + max(0, (inner_h - total_h) // 2)
+        for i, (ch, f, bb) in enumerate(fonts_bbs):
+            tw, th = bb[2] - bb[0], bb[3] - bb[1]
+            x = (W - tw) // 2
+            put_text(draw, (x, y - bb[1]), ch, f, is_new=(i == n - 1))
+            y += th + 10
+
+    elif layout == "comic_slash":
+        # Diagonal banner across screen with thick border
+        banner = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        bd = ImageDraw.Draw(banner)
+        # thick diagonal band
+        band_h = int(H * 0.28)
+        pts = [
+            (-80, H // 2 - band_h // 2 + 120),
+            (W + 80, H // 2 - band_h // 2 - 120),
+            (W + 80, H // 2 + band_h // 2 - 120),
+            (-80, H // 2 + band_h // 2 + 120),
+        ]
+        bd.polygon(pts, fill=(255, 255, 255, 255), outline=(10, 10, 10, 255))
+        # black outline by drawing offset polygons
+        for off in range(10, 0, -2):
+            pts_o = [
+                (-80 - off, H // 2 - band_h // 2 + 120),
+                (W + 80 + off, H // 2 - band_h // 2 - 120),
+                (W + 80 + off, H // 2 + band_h // 2 - 120),
+                (-80 - off, H // 2 + band_h // 2 + 120),
+            ]
+            bd.polygon(pts_o, outline=(10, 10, 10, 255))
+        overlay = Image.alpha_composite(overlay, banner)
+        draw = ImageDraw.Draw(overlay)
+        # text along diagonal (approx horizontal centered, then rotate each?)
+        # Simpler: draw text centered then rotate whole text layer lightly
+        text_layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        td = ImageDraw.Draw(text_layer)
+        base_size = 150 if len(shown) <= 6 else 110
+        fonts_bbs = []
+        for i, ch in enumerate(chunks_visible):
+            f = font_for(i, base_size)
+            bb = td.textbbox((0, 0), ch, font=f)
+            fonts_bbs.append((ch, f, bb))
+        total_w = sum(bb[2] - bb[0] for _, _, bb in fonts_bbs) + 6 * max(0, n - 1)
+        while total_w > W - 80 and base_size > 48:
+            base_size -= 8
+            fonts_bbs = []
+            for i, ch in enumerate(chunks_visible):
+                f = font_for(i, base_size)
+                bb = td.textbbox((0, 0), ch, font=f)
+                fonts_bbs.append((ch, f, bb))
+            total_w = sum(bb[2] - bb[0] for _, _, bb in fonts_bbs) + 6 * max(0, n - 1)
+        x = (W - total_w) // 2
+        y = H // 2 - 40
+        for i, (ch, f, bb) in enumerate(fonts_bbs):
+            tw = bb[2] - bb[0]
+            # put_text on text_layer
+            put_text(td, (x, y - bb[1]), ch, f, is_new=(i == n - 1), target=text_layer)
+            x += tw + 6
+        text_layer = text_layer.rotate(-18, resample=Image.Resampling.BICUBIC, expand=False)
+        overlay = Image.alpha_composite(overlay, text_layer)
+        draw = ImageDraw.Draw(overlay)
+
+    elif layout == "comic_stack_burst":
+        # Stacked words with mandatory thick panel border + burst on newest
+        m = 40
+        draw.rectangle([m, m, W - m, H - m], outline=(10, 10, 10, 255), width=14)
+        base_size = 190 if len(shown) <= 4 else 140
+        while base_size >= 40:
+            fonts_bbs = []
+            total_h = 0
+            max_w = 0
+            for i, ch in enumerate(chunks_visible):
+                f = font_for(i, base_size)
+                bb = draw.textbbox((0, 0), ch, font=f)
+                fonts_bbs.append((ch, f, bb))
+                total_h += (bb[3] - bb[1]) + 14
+                max_w = max(max_w, bb[2] - bb[0] + 30)
+            if total_h <= H - 160 and max_w <= W - 100:
+                break
+            base_size -= 8
+        y = max(m + 40, (H - total_h) // 2)
+        for i, (ch, f, bb) in enumerate(fonts_bbs):
+            tw, th = bb[2] - bb[0], bb[3] - bb[1]
+            x = (W - tw) // 2
+            put_text(draw, (x, y - bb[1]), ch, f, is_new=(i == n - 1))
+            y += th + 14
+
+    elif layout == "ink_vertical":
+        # Classic top→bottom single column center, generous paper margins
+        margin = int(min(W, H) * 0.12)
+        target_h = H - 2 * margin
+        base_size = int(H * 0.12)
+        while base_size >= 40:
+            total_h = 0
+            max_w = 0
+            for i, ch in enumerate(chunks_visible):
+                f = font_for(i, base_size)
+                bb = draw.textbbox((0, 0), ch, font=f)
+                total_h += (bb[3] - bb[1]) + 14
+                max_w = max(max_w, bb[2] - bb[0])
+            if total_h <= target_h and max_w <= W - 2 * margin:
+                break
+            base_size -= 6
+        fonts_bbs = []
+        total_h = 0
+        for i, ch in enumerate(chunks_visible):
+            f = font_for(i, base_size)
+            bb = draw.textbbox((0, 0), ch, font=f)
+            fonts_bbs.append((ch, f, bb))
+            total_h += (bb[3] - bb[1]) + 14
+        y = margin + max(0, (target_h - total_h) // 2)
+        for i, (ch, f, bb) in enumerate(fonts_bbs):
+            tw, th = bb[2] - bb[0], bb[3] - bb[1]
+            x = (W - tw) // 2
+            put_text(draw, (x, y - bb[1]), ch, f, is_new=(i == n - 1))
+            y += th + 14
+
+    elif layout == "ink_two_col":
+        # Two short columns (split mid)
+        margin = int(min(W, H) * 0.10)
+        mid = (n + 1) // 2
+        cols = [list(chunks_visible[:mid]), list(chunks_visible[mid:])]
+        if not cols[1]:
+            cols[1] = cols[0][-1:]
+            cols[0] = cols[0][:-1] or cols[0]
+        base_size = int(H * 0.10)
+        col_w = (W - 3 * margin) // 2
+
+        def _fit_col(chs, bs):
+            while bs >= 36:
+                th = 0
+                mw = 0
+                for j, ch in enumerate(chs):
+                    # punch only on global newest
+                    f = _font(font_path, max(24, int(bs * sc_all * (punch if (chs is cols[1] and j == len(chs) - 1 and cols[1] and chunks_visible and chs[j] == chunks_visible[-1] and j == len(chs) - 1) else 1.0))))
+                    bb = draw.textbbox((0, 0), ch, font=f)
+                    th += (bb[3] - bb[1]) + 12
+                    mw = max(mw, bb[2] - bb[0])
+                if th <= H - 2 * margin and mw <= col_w:
+                    return bs
+                bs -= 6
+            return 36
+
+        base_size = min(_fit_col(cols[0], base_size), _fit_col(cols[1], base_size))
+        xs = [margin + col_w // 2, margin * 2 + col_w + col_w // 2]
+        global_i = 0
+        for ci, chs in enumerate(cols):
+            fonts_bbs = []
+            total_h = 0
+            for j, ch in enumerate(chs):
+                is_newest = (global_i + j == n - 1)
+                sc = punch if is_newest else 1.0
+                f = _font(font_path, max(24, int(base_size * sc_all * sc)))
+                bb = draw.textbbox((0, 0), ch, font=f)
+                fonts_bbs.append((ch, f, bb, is_newest))
+                f_set = _font(font_path, max(24, int(base_size * sc_all)))
+                bb_set = draw.textbbox((0, 0), ch, font=f_set)
+                total_h += (bb_set[3] - bb_set[1]) + 12
+            y = margin + max(0, (H - 2 * margin - total_h) // 2)
+            for ch, f, bb, is_newest in fonts_bbs:
+                tw, th = bb[2] - bb[0], bb[3] - bb[1]
+                x = xs[ci] - tw // 2
+                put_text(draw, (x, y - bb[1]), ch, f, is_new=is_newest)
+                f_set = _font(font_path, max(24, int(base_size * sc_all)))
+                bb_set = draw.textbbox((0, 0), ch, font=f_set)
+                y += (bb_set[3] - bb_set[1]) + 12
+            global_i += len(chs)
+
+    elif layout == "ink_seal":
+        # Main vertical + small red seal stamp bottom-right
+        margin = int(min(W, H) * 0.12)
+        target_h = H - 2 * margin - 80
+        base_size = int(H * 0.11)
+        while base_size >= 40:
+            total_h = 0
+            max_w = 0
+            for i, ch in enumerate(chunks_visible):
+                f = font_for(i, base_size)
+                bb = draw.textbbox((0, 0), ch, font=f)
+                total_h += (bb[3] - bb[1]) + 12
+                max_w = max(max_w, bb[2] - bb[0])
+            if total_h <= target_h and max_w <= W - 2 * margin:
+                break
+            base_size -= 6
+        fonts_bbs = []
+        total_h = 0
+        for i, ch in enumerate(chunks_visible):
+            f = font_for(i, base_size)
+            bb = draw.textbbox((0, 0), ch, font=f)
+            fonts_bbs.append((ch, f, bb))
+            total_h += (bb[3] - bb[1]) + 12
+        y = margin + max(0, (target_h - total_h) // 2)
+        for i, (ch, f, bb) in enumerate(fonts_bbs):
+            tw, th = bb[2] - bb[0], bb[3] - bb[1]
+            x = (W - tw) // 2 - 20
+            put_text(draw, (x, y - bb[1]), ch, f, is_new=(i == n - 1))
+            y += th + 12
+        # red seal stamp
+        seal_s = 92
+        seal = Image.new("RGBA", (seal_s + 8, seal_s + 8), (0, 0, 0, 0))
+        sd = ImageDraw.Draw(seal)
+        sd.rounded_rectangle([4, 4, seal_s, seal_s], radius=8, outline=(180, 36, 36, 230), width=5)
+        sd.rounded_rectangle([10, 10, seal_s - 6, seal_s - 6], radius=4, outline=(180, 36, 36, 180), width=2)
+        sf = _font(font_path, 28)
+        label = "印"
+        sbb = sd.textbbox((0, 0), label, font=sf)
+        sx = 4 + (seal_s - (sbb[2] - sbb[0])) // 2
+        sy = 4 + (seal_s - (sbb[3] - sbb[1])) // 2 - sbb[1]
+        sd.text((sx, sy), label, font=sf, fill=(180, 36, 36, 230))
+        seal = seal.rotate(12, expand=True, resample=Image.Resampling.BICUBIC)
+        overlay.alpha_composite(seal, (W - margin - seal.width, H - margin - seal.height + 10))
+        draw = ImageDraw.Draw(overlay)
+
 
     else:  # center_slam
         base_size = 220 if len(shown) <= 4 else (180 if len(shown) <= 8 else 140)
@@ -1266,6 +1745,64 @@ def _gap_clip(
     return dst
 
 
+
+def _solid_gap_clip(
+    dst: Path,
+    gap: float,
+    color: Tuple[int, int, int],
+    *,
+    width: int,
+    height: int,
+    fps: int,
+    work: Path,
+) -> Path:
+    """Solid-color gap (black cut / flash body)."""
+    dur = max(1.0 / fps, float(gap))
+    frames = max(1, int(round(dur * fps)))
+    fdir = work / "clips" / f"fgap_{dst.stem}"
+    fdir.mkdir(parents=True, exist_ok=True)
+    im = Image.new("RGB", (width, height), tuple(color[:3]))
+    for fi in range(frames):
+        im.save(fdir / f"{fi:04d}.jpg", quality=85)
+    _encode_frames(fdir, dst, fps, dur)
+    _cleanup_frames(fdir)
+    return dst
+
+
+def _flash_gap_clip(
+    dst: Path,
+    gap: float,
+    style: Dict[str, Any],
+    *,
+    width: int,
+    height: int,
+    fps: int,
+    work: Path,
+) -> Path:
+    """2–3 frame white/black flash then solid matte for remaining gap."""
+    dur = max(1.0 / fps, float(gap))
+    frames = max(1, int(round(dur * fps)))
+    flash_n = min(3, frames)
+    fc = style.get("flash_color")
+    mode = _style_mode(style)
+    if fc and isinstance(fc, (list, tuple)) and len(fc) >= 3:
+        flash_rgb = (int(fc[0]), int(fc[1]), int(fc[2]))
+    elif mode == "comic":
+        flash_rgb = (255, 255, 255)
+    else:
+        flash_rgb = (0, 0, 0)
+    body = (0, 0, 0)
+    fdir = work / "clips" / f"fflash_{dst.stem}"
+    fdir.mkdir(parents=True, exist_ok=True)
+    flash_im = Image.new("RGB", (width, height), flash_rgb)
+    body_im = Image.new("RGB", (width, height), body)
+    for fi in range(frames):
+        (flash_im if fi < flash_n else body_im).save(fdir / f"{fi:04d}.jpg", quality=85)
+    _encode_frames(fdir, dst, fps, dur)
+    _cleanup_frames(fdir)
+    return dst
+
+
 def _hold_line_clip(
     idx: int,
     line: TimedLine,
@@ -1311,6 +1848,15 @@ def _hold_line_clip(
         line_index=idx,
         decor=bool(style.get("decor", False)),
     )
+    hold_op = style.get("hold_opacity")
+    if hold_op is not None:
+        try:
+            op = float(hold_op)
+        except (TypeError, ValueError):
+            op = 1.0
+        if 0.0 < op < 1.0:
+            # Lightly faded previous lyric (blueprint measured hold)
+            im = Image.blend(line_bg.convert("RGB"), im.convert("RGB"), op)
     for fi in range(frames):
         im.save(fdir / f"{fi:04d}.jpg", quality=88)
 
@@ -1448,8 +1994,14 @@ def prepare_lines(
     if is_poster_fill(style):
         assign_poster_layouts(lines)
     else:
-        assign_layouts(lines, LAYOUTS)
-    assign_chunk_times(lines, reveal_frac=REVEAL_FRAC, max_per_char=MAX_PER_CHAR)
+        assign_style_layouts(lines, style)
+    rf = style.get("reveal_frac")
+    mpc = style.get("max_per_char")
+    assign_chunk_times(
+        lines,
+        reveal_frac=float(rf) if rf is not None else REVEAL_FRAC,
+        max_per_char=float(mpc) if mpc is not None else MAX_PER_CHAR,
+    )
     return lines
 
 
@@ -1475,7 +2027,7 @@ def render_mv(
     width: int = 1080,
     height: int = 1920,
     fps: int = 24,
-    gap_mode: str = "hold",
+    gap_mode: Optional[str] = None,
 ) -> Path:
     """Full render pipeline → final mp4 at `out`."""
     _require_ffmpeg()
@@ -1556,9 +2108,7 @@ def render_mv(
             fade_dur=title_fade,
         )
 
-    gap_mode = (gap_mode or "hold").lower().strip()
-    if gap_mode not in ("hold", "black"):
-        raise ValueError(f"gap_mode must be 'hold' or 'black', got {gap_mode!r}")
+    gap_mode = resolve_gap_mode(style, gap_mode)
 
     # Track previous visual for hold gaps (title or last lyric line index)
     prev_visual: Optional[str] = None  # "title" | "line"
@@ -1603,10 +2153,17 @@ def render_mv(
                         dst=gpath,
                     )
                 )
-            else:
-                # black / matte fallback (no previous visual, or gap_mode=black)
+            elif gap_mode == "flash":
                 parts.append(
-                    _gap_clip(bg_jpg, gpath, gap, width=width, height=height, fps=fps)
+                    _flash_gap_clip(
+                        gpath, gap, style,
+                        width=width, height=height, fps=fps, work=work,
+                    )
+                )
+            else:
+                # black / cut matte (solid black, not style bg)
+                parts.append(
+                    _solid_gap_clip(gpath, gap, (0, 0, 0), width=width, height=height, fps=fps, work=work)
                 )
         elif part.kind == "line":
             assert part.line_index is not None

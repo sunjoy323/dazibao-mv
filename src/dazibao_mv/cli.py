@@ -179,9 +179,9 @@ def build_parser() -> argparse.ArgumentParser:
     rp.add_argument("--fps", type=int, default=24)
     rp.add_argument(
         "--gap-mode",
-        choices=("hold", "black"),
-        default="hold",
-        help="Inter-lyric gaps: hold previous lyric/title (default) or solid black matte",
+        choices=("auto", "hold", "black", "cut", "flash"),
+        default="auto",
+        help="Inter-lyric gaps: auto=style default, hold, black/cut matte, or flash (2–3 frame cut)",
     )
     rp.set_defaults(func=_cmd_render)
 

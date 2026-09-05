@@ -127,6 +127,49 @@ def _normalize_style(data: Dict[str, Any], source: str) -> Dict[str, Any]:
     else:
         style["title"] = {}
 
+    # Motion language (layouts / punch / gap / reveal)
+    layouts = style.get("layouts")
+    if isinstance(layouts, (list, tuple)):
+        style["layouts"] = [str(x) for x in layouts if x]
+    else:
+        style["layouts"] = []
+    punch = style.get("punch") or {}
+    if not isinstance(punch, dict):
+        punch = {}
+    kind = str(punch.get("kind") or "scale").strip().lower()
+    if kind not in ("scale", "glitch", "slide", "slam", "soft"):
+        kind = "scale"
+    try:
+        amount = float(punch.get("amount", 1.32))
+    except (TypeError, ValueError):
+        amount = 1.32
+    try:
+        glitch_px = int(punch.get("glitch_px", 12))
+    except (TypeError, ValueError):
+        glitch_px = 12
+    style["punch"] = {"kind": kind, "amount": amount, "glitch_px": glitch_px}
+    gap = str(style.get("gap_mode") or "").strip().lower()
+    if gap in ("hold", "black", "cut", "flash"):
+        style["gap_mode"] = gap
+    else:
+        style["gap_mode"] = ""
+    fill = str(style.get("fill") or "").strip().lower()
+    style["fill"] = fill
+    for key, default in (("reveal_frac", None), ("max_per_char", None), ("hold_opacity", None)):
+        raw = style.get(key, default)
+        if raw is None or raw == "":
+            style[key] = None
+        else:
+            try:
+                style[key] = float(raw)
+            except (TypeError, ValueError):
+                style[key] = None
+    fc = style.get("flash_color")
+    if isinstance(fc, (list, tuple)) and len(fc) >= 3:
+        style["flash_color"] = (int(fc[0]), int(fc[1]), int(fc[2]))
+    else:
+        style["flash_color"] = None
+
     style["_source"] = source
     return style
 
