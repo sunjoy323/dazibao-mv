@@ -449,7 +449,7 @@ def _pick_sequential_cue(
     cursor: float = 0.0,
     window: int = 16,
     min_ratio: float = 0.32,
-    max_ahead: float = 14.0,
+    max_ahead: float = 20.0,
 ) -> Tuple[Optional[int], float]:
     """Return (index, ratio) for the next lyric — earliest acceptable match.
 
@@ -461,8 +461,8 @@ def _pick_sequential_cue(
     ``max_ahead`` further refuses matches whose cue start is too far past the
     current cursor, so an extra repeated lyric (ASR merged two lines) falls
     back to a short synthetic span instead of leaping over the bridge.
-    Default is 14s: tight enough to block ~20s chorus leaps when remainder
-    reuse cannot fire, but loose enough for sparse ASR gaps on real tracks.
+    Default is 20s: covers typical instrumental breaks without packing the next
+    verse into the gap; remainder reuse still owns merged-cue chorus halves.
     """
     end = min(ai + window, len(cues))
     best_j: Optional[int] = None
@@ -564,7 +564,29 @@ def match_lyrics_to_cues(
             # Prefer the earliest cue above threshold so repeated chorus
             # lines cannot jump ahead to a later identical occurrence and
             # orphan the bridge that sits between them in the ASR stream.
-            best_j, best_r = _pick_sequential_cue(nt, cues, ai, cursor=cursor, window=16, max_ahead=14.0)
+            best_j, best_r = _pick_sequential_cue(nt, cues, ai, cursor=cursor, window=16, max_ahead=20.0)
+
+        if not (best_j is not None and best_r >= 0.32):
+            # Sequential pick may miss a cue just past max_ahead (e.g. post-
+            # instrumental verse). Before synthesizing at cursor, look once more
+            # for a *strong* match within a slightly wider wait window so we do
+            # not pack the next lyric into the instrumental break. Remainder
+            # reuse still owns merged-cue halves; this only waits for real cues.
+            wait_horizon = cursor + 25.0
+            strong_j: Optional[int] = None
+            strong_r = -1.0
+            if cues and cursor > 1.0:
+                for j in range(ai, len(cues)):
+                    st = float(cues[j]["start"])
+                    if st > wait_horizon:
+                        break
+                    if st < cursor - 0.05:
+                        continue
+                    r = _cue_similarity(nt, cues[j].get("text") or "")
+                    if r >= 0.5 and r > strong_r:
+                        strong_r, strong_j = r, j
+            if strong_j is not None:
+                best_j, best_r = strong_j, strong_r
 
         if best_j is not None and best_r >= 0.32:
             cue = cues[best_j]

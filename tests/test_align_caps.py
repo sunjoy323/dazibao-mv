@@ -202,3 +202,25 @@ def test_merged_no_punct_chorus_reuses_remainder_with_words():
     assert second[0]["start"] < 268.0, second[0]
     assert aligned[0]["end"] <= second[0]["start"] + 0.05
 
+def test_instrumental_gap_waits_for_next_verse():
+    """Post-chorus instrumental (~14s) must not pack the next verse at cursor.
+
+    Regression: max_ahead=14 made 老旧单车 (cue ~172.8) fall just outside
+    cursor(158)+14 → synthesize at ~158, filling the break. Restoring
+    max_ahead=20 (and strong-wait fallback) keeps the gap.
+    """
+    lyrics = [
+        "谁又不曾是别人的白月光",
+        "老旧单车的后座",
+        "载过谁的故事",
+    ]
+    cues = [
+        {"start": 153.0, "end": 158.0, "text": "谁又不曾是别人的白月光"},
+        {"start": 172.76, "end": 175.5, "text": "老旧单车的后座"},
+        {"start": 175.5, "end": 178.0, "text": "载过谁的故事"},
+    ]
+    aligned = match_lyrics_to_cues(lyrics, cues, max_chars=12, max_line_sec=5.5)
+    bike = [a for a in aligned if "老旧单车" in a["text"]][0]
+    assert bike["start"] >= 170.0, bike
+    assert bike["start"] < 176.0, bike
+
