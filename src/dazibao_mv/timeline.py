@@ -328,7 +328,7 @@ def assign_chunk_times(
     reveal_frac: float = REVEAL_FRAC,
     max_per_char: float = MAX_PER_CHAR,
 ) -> None:
-    """Distribute reveal times within each clamped [t0, t1]."""
+    """Distribute reveal times within each clamped [t0, t1] (uniform)."""
     for L in lines:
         if not L.chunks:
             from .split import glyph_chunks
@@ -339,6 +339,195 @@ def assign_chunk_times(
         reveal_dur = min(dur * reveal_frac, n * max_per_char)
         reveal_dur = max(reveal_dur, min(dur * 0.35, n * 0.18))
         L.chunk_times = [L.t0 + reveal_dur * (i / n) for i in range(n)]
+
+
+def _content_words(words: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Drop empty / pure-punctuation Whisper word tokens."""
+    import re
+    punct = re.compile(r"^[，,。.!！？?；;、：:\s\-—…｡､\uFE50-\uFE5F]+$")
+    out: List[Dict[str, Any]] = []
+    for w in words or []:
+        raw = str(w.get("word") or "").strip()
+        if not raw or punct.fullmatch(raw):
+            continue
+        out.append(w)
+    return out
+
+
+def _glyph_starts_from_words(
+    text: str,
+    words: Sequence[Dict[str, Any]],
+    *,
+    t0: float,
+    t1: float,
+) -> Optional[List[float]]:
+    """Map each glyph of ``text`` to an absolute start time from word stamps."""
+    content = _content_words(words)
+    if not content:
+        return None
+    # Flatten word tokens into per-CJK/alnum char owners with interpolated starts.
+    char_starts: List[float] = []
+    char_ends: List[float] = []
+    stream_chars: List[str] = []
+    for w in content:
+        raw = str(w.get("word") or "").strip()
+        glyphs = [ch for ch in raw if ch.strip() and not ch.isspace()]
+        if not glyphs:
+            continue
+        ws, we = float(w["start"]), float(w["end"])
+        if we < ws:
+            we = ws + 0.05
+        span = max(0.05, we - ws)
+        for i, ch in enumerate(glyphs):
+            stream_chars.append(ch)
+            char_starts.append(ws + span * (i / len(glyphs)))
+            char_ends.append(ws + span * ((i + 1) / len(glyphs)))
+    if not stream_chars:
+        return None
+
+    # Same cleaning as glyph_chunks / split._clean (drop spaces)
+    cleaned = text.replace(" ", "").replace("\u3000", "").strip()
+    if not cleaned:
+        return None
+
+    def _is_content(ch: str) -> bool:
+        o = ord(ch)
+        return ("\u4e00" <= ch <= "\u9fff") or ch.isalnum()
+
+    # Greedy match content glyphs; punctuation inherits previous start (no ASR consume).
+    starts: List[float] = []
+    si = 0
+    prev = t0
+    content_matched = 0
+    for ch in cleaned:
+        if not _is_content(ch):
+            starts.append(prev)
+            continue
+        if si >= len(stream_chars):
+            starts.append(min(t1, prev + 0.12))
+            prev = starts[-1]
+            continue
+        found = None
+        for look in range(si, min(si + 4, len(stream_chars))):
+            if stream_chars[look] == ch:
+                found = look
+                break
+        if found is not None:
+            st = char_starts[found]
+            si = found + 1
+        else:
+            st = char_starts[si]
+            si += 1
+        st = min(t1, max(t0, st))
+        starts.append(st)
+        prev = st
+        content_matched += 1
+    if content_matched < 1:
+        return None
+    if len(starts) != len(cleaned):
+        return None
+    return starts
+
+
+def _chunk_punch_intensities(
+    chunk_starts: Sequence[float],
+    chunk_ends: Sequence[float],
+    *,
+    t1: float,
+) -> List[float]:
+    """Map duration + gap-before-next → punch intensity in [0.7, 1.4]."""
+    n = len(chunk_starts)
+    if n == 0:
+        return []
+    scores: List[float] = []
+    for i in range(n):
+        dur = max(0.04, float(chunk_ends[i]) - float(chunk_starts[i]))
+        if i + 1 < n:
+            gap = max(0.0, float(chunk_starts[i + 1]) - float(chunk_ends[i]))
+        else:
+            gap = max(0.0, float(t1) - float(chunk_ends[i]))
+        # Longer held syllables + pause before next → heavier punch
+        scores.append(dur + 0.55 * gap)
+    lo, hi = min(scores), max(scores)
+    if hi - lo < 1e-6:
+        return [1.0] * n
+    out: List[float] = []
+    for s in scores:
+        # normalize 0..1 then map to 0.7..1.4
+        x = (s - lo) / (hi - lo)
+        out.append(round(0.7 + 0.7 * x, 3))
+    return out
+
+
+def assign_chunk_times_rhythm(
+    lines: Sequence[TimedLine],
+    *,
+    reveal_frac: float = REVEAL_FRAC,
+    max_per_char: float = MAX_PER_CHAR,
+) -> None:
+    """Map glyph_chunks to Whisper word starts; store per-chunk punch intensity.
+
+    Falls back to uniform :func:`assign_chunk_times` per line when no usable
+    words are attached. Intensities land in ``TimedLine.extra["chunk_punch"]``
+    (floats 0.7–1.4). Absolute reveal times go in ``chunk_times``.
+    """
+    from .split import glyph_chunks
+
+    for L in lines:
+        if not L.chunks:
+            L.chunks = glyph_chunks(L.text) or [L.text]
+        words = L.extra.get("words") or []
+        glyph_starts = _glyph_starts_from_words(L.text, words, t0=L.t0, t1=L.t1)
+        if not glyph_starts or len(glyph_starts) < 1:
+            assign_chunk_times(
+                [L], reveal_frac=reveal_frac, max_per_char=max_per_char
+            )
+            L.extra["chunk_punch"] = [1.0] * len(L.chunks)
+            L.extra["punch_fallback"] = "uniform"
+            continue
+
+        # Build cleaned glyph list matching glyph_starts length
+        clean_text = L.text.replace(" ", "").replace("\u3000", "")
+        # glyph_chunks works on _clean text; rebuild index into clean_text
+        chunks = L.chunks
+        # Map each chunk to start = first glyph start; end = last glyph end
+        # Walk clean_text with same chunking
+        idx = 0
+        chunk_starts: List[float] = []
+        chunk_ends: List[float] = []
+        # Estimate per-glyph ends from neighboring starts
+        g_ends = []
+        for i, st in enumerate(glyph_starts):
+            if i + 1 < len(glyph_starts):
+                g_ends.append(max(st + 0.04, glyph_starts[i + 1]))
+            else:
+                g_ends.append(min(L.t1, st + 0.2))
+
+        for ch in chunks:
+            n = max(1, len(ch))
+            if idx >= len(glyph_starts):
+                # pad from last
+                st = chunk_starts[-1] if chunk_starts else L.t0
+                en = min(L.t1, st + 0.1)
+            else:
+                st = glyph_starts[idx]
+                en = g_ends[min(idx + n - 1, len(g_ends) - 1)]
+            chunk_starts.append(st)
+            chunk_ends.append(en)
+            idx += n
+
+        # Enforce monotonic non-decreasing starts within [t0,t1]
+        prev = L.t0
+        fixed: List[float] = []
+        for st in chunk_starts:
+            st = min(L.t1, max(prev, min(L.t1, max(L.t0, st))))
+            fixed.append(st)
+            prev = st
+        L.chunk_times = fixed
+        L.extra["chunk_punch"] = _chunk_punch_intensities(
+            fixed, chunk_ends, t1=L.t1
+        )
+        L.extra.pop("punch_fallback", None)
 
 
 @dataclass

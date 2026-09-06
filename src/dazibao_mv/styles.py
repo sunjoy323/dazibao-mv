@@ -148,6 +148,8 @@ def _normalize_style(data: Dict[str, Any], source: str) -> Dict[str, Any]:
     except (TypeError, ValueError):
         glitch_px = 12
     style["punch"] = {"kind": kind, "amount": amount, "glitch_px": glitch_px}
+    pm = str(style.get("punch_mode") or "uniform").strip().lower()
+    style["punch_mode"] = pm if pm in ("uniform", "rhythm") else "uniform"
     gap = str(style.get("gap_mode") or "").strip().lower()
     if gap in ("hold", "black", "cut", "flash"):
         style["gap_mode"] = gap

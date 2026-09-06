@@ -484,6 +484,75 @@ def _pick_sequential_cue(
     return best_j, best_r
 
 
+
+def words_for_lyric(
+    lyric: str,
+    cue: Dict[str, Any],
+    *,
+    t0: Optional[float] = None,
+    t1: Optional[float] = None,
+) -> List[Dict[str, Any]]:
+    """Return Whisper word dicts covering ``lyric`` within ``cue``.
+
+    Prefers character-matched subspan; falls back to words overlapping [t0,t1].
+    """
+    words = cue.get("words") or []
+    if not words:
+        return []
+    want = _normalize(lyric)
+    # Flatten content chars → owning word
+    chars: List[str] = []
+    owners: List[Dict[str, Any]] = []
+    for w in words:
+        raw = (w.get("word") or "").strip()
+        if not raw or _WORD_PUNCT.fullmatch(raw):
+            continue
+        for ch in raw:
+            n = _normalize(ch)
+            if not n:
+                continue
+            chars.append(n)
+            owners.append(w)
+    stream = "".join(chars)
+    matched: List[Dict[str, Any]] = []
+    if want and stream:
+        idx = stream.find(want)
+        if idx < 0:
+            for L in range(len(want), max(1, len(want) // 2) - 1, -1):
+                j = stream.find(want[:L])
+                if j >= 0:
+                    idx = j
+                    want = want[:L]
+                    break
+        if idx >= 0:
+            i0, i1 = idx, idx + len(want) - 1
+            if i1 < len(owners):
+                seen = set()
+                for i in range(i0, i1 + 1):
+                    w = owners[i]
+                    wid = id(w)
+                    if wid not in seen:
+                        seen.add(wid)
+                        matched.append(w)
+    if matched:
+        return [
+            {"start": float(w["start"]), "end": float(w["end"]), "word": (w.get("word") or "").strip()}
+            for w in matched
+        ]
+    # overlap fallback
+    if t0 is None or t1 is None:
+        return []
+    out: List[Dict[str, Any]] = []
+    for w in words:
+        raw = (w.get("word") or "").strip()
+        if not raw or _WORD_PUNCT.fullmatch(raw):
+            continue
+        ws, we = float(w["start"]), float(w["end"])
+        if we > float(t0) - 0.02 and ws < float(t1) + 0.02:
+            out.append({"start": ws, "end": we, "word": raw})
+    return out
+
+
 def match_lyrics_to_cues(
     lyrics: Sequence[str],
     cues: Sequence[Dict[str, Any]],
@@ -588,9 +657,12 @@ def match_lyrics_to_cues(
             if strong_j is not None:
                 best_j, best_r = strong_j, strong_r
 
+        matched_cue_words: List[Dict[str, Any]] = []
         if best_j is not None and best_r >= 0.32:
             cue = cues[best_j]
             orig_end = float(cue["end"])
+            # Capture words before remainder reuse mutates the cue
+            matched_cue_words = list(cue.get("words") or [])
             sub = lyric_subspan_from_words(raw, cue)
             if sub is not None:
                 start, end = sub
@@ -620,11 +692,17 @@ def match_lyrics_to_cues(
         spans = redistribute_times(start, end, pieces)
         # Mark pieces from one source lyric so layout anti-repeat can allow a pair
         split_group = f"src-{len(aligned)}" if len(pieces) > 1 else None
+        # Snapshot words from the matched cue (before remainder reuse mutates it)
+        src_cue: Dict[str, Any] = {"words": list(matched_cue_words)} if matched_cue_words else {}
         for piece, (t0, t1) in zip(pieces, spans):
             t0, t1 = cap_span(t0, t1, piece, max_sec=max_line_sec)
             item = {"start": round(t0, 3), "end": round(t1, 3), "text": piece}
             if split_group is not None:
                 item["split_group"] = split_group
+            if src_cue.get("words"):
+                pw = words_for_lyric(piece, src_cue, t0=t0, t1=t1)
+                if pw:
+                    item["words"] = pw
             aligned.append(item)
 
     # ensure monotonic non-decreasing starts

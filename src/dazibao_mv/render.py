@@ -27,6 +27,7 @@ from .timeline import (
     POSTER_LAYOUTS,
     TimedLine,
     assign_chunk_times,
+    assign_chunk_times_rhythm,
     assign_layouts,
     assign_poster_layouts,
     assign_style_layouts,
@@ -39,11 +40,20 @@ REVEAL_FRAC = 0.48
 MAX_PER_CHAR = 0.30
 
 
-def compute_punch_state(t_local: float, style: Dict[str, Any]) -> Tuple[float, str, Dict[str, Any]]:
+def compute_punch_state(
+    t_local: float,
+    style: Dict[str, Any],
+    *,
+    intensity: float = 1.0,
+) -> Tuple[float, str, Dict[str, Any]]:
     """Return (scale, kind, extras) for the newest glyph.
 
     kinds: scale (default), glitch, slide, slam, soft
     extras may include glitch_ox, slide (0..1 remaining).
+
+    ``intensity`` (rhythm mode, typically 0.7–1.4) multiplies the scale
+    overshoot so heavier syllables punch harder. Slide kind ignores intensity
+    for scale (stays 1.0) but still records it in extras.
     """
     cfg = style.get("punch") or {}
     kind = str(cfg.get("kind") or "scale").strip().lower()
@@ -55,8 +65,16 @@ def compute_punch_state(t_local: float, style: Dict[str, Any]) -> Tuple[float, s
         glitch_px = int(cfg.get("glitch_px", 12))
     except (TypeError, ValueError):
         glitch_px = 12
+    try:
+        inten = float(intensity)
+    except (TypeError, ValueError):
+        inten = 1.0
+    inten = max(0.5, min(1.6, inten))
     t = max(0.0, float(t_local))
-    extras: Dict[str, Any] = {}
+    extras: Dict[str, Any] = {"intensity": inten}
+
+    def _scale(overshoot: float, decay: float) -> float:
+        return 1.0 + overshoot * decay * inten
 
     if kind == "slide":
         # No bounce scale; slide progress 1→0 (~0.2s)
@@ -65,10 +83,10 @@ def compute_punch_state(t_local: float, style: Dict[str, Any]) -> Tuple[float, s
     if kind == "slam":
         # 2.2 → 1.0 in ~3–4 frames @24fps
         decay = max(0.0, 1.0 - t / 0.14)
-        return 1.0 + (amount - 1.0) * decay, kind, extras
+        return _scale(amount - 1.0, decay), kind, extras
     if kind == "glitch":
         decay = max(0.0, 1.0 - t * 20.0)
-        scale = 1.0 + (amount - 1.0) * decay
+        scale = _scale(amount - 1.0, decay)
         # ~1-frame horizontal glitch on newest glyph
         if t < (1.0 / 24.0):
             extras["glitch_ox"] = glitch_px if (int(t * 48) % 2 == 0) else -glitch_px
@@ -77,11 +95,11 @@ def compute_punch_state(t_local: float, style: Dict[str, Any]) -> Tuple[float, s
         return scale, kind, extras
     if kind == "soft":
         decay = max(0.0, 1.0 - t * 5.0)
-        return 1.0 + (amount - 1.0) * decay, kind, extras
+        return _scale(amount - 1.0, decay), kind, extras
     # scale (classic ivory/poster): 1.0 + 0.32 * decay
     overshoot = (amount - 1.0) if amount > 1.0 else 0.32
     decay = max(0.0, 1.0 - t * 12.0)
-    return 1.0 + overshoot * decay, "scale", extras
+    return _scale(overshoot, decay), "scale", extras
 
 
 def resolve_gap_mode(style: Dict[str, Any], gap_mode: Optional[str] = None) -> str:
@@ -699,6 +717,7 @@ def draw_layout(
     palette: Optional[Dict[str, Any]] = None,
     line_index: int = 0,
     decor: bool = False,
+    punch_intensity: float = 1.0,
 ) -> Image.Image:
     W, H = width, height
     canvas = base.copy().convert("RGBA")
@@ -741,7 +760,7 @@ def draw_layout(
     verse_accent = color_tuple(style, "verse", "accent")
 
     n = len(chunks_visible)
-    punch, punch_kind, punch_extras = compute_punch_state(t_local, style)
+    punch, punch_kind, punch_extras = compute_punch_state(t_local, style, intensity=punch_intensity)
     glitch_ox = int(punch_extras.get("glitch_ox") or 0)
     slide_rem = float(punch_extras.get("slide") or 0.0)
     nchar = max(1, len(shown.replace(" ", "")))
@@ -1884,6 +1903,13 @@ def build_line_clip(
         n_show = sum(1 for ct in line.chunk_times if t >= ct)
         n_show = max(1, min(n_show, len(line.chunks)))
         t_local = t - line.chunk_times[n_show - 1]
+        punches = line.extra.get("chunk_punch") or []
+        inten = 1.0
+        if punches and n_show - 1 < len(punches):
+            try:
+                inten = float(punches[n_show - 1])
+            except (TypeError, ValueError):
+                inten = 1.0
         im = draw_layout(
             line_bg,
             line.chunks[:n_show],
@@ -1898,6 +1924,7 @@ def build_line_clip(
             palette=palette,
             line_index=idx,
             decor=bool(style.get("decor", False)),
+            punch_intensity=inten,
         )
         im.save(fdir / f"{fi:04d}.jpg", quality=88)
 
@@ -2160,6 +2187,7 @@ def prepare_lines(
     lead: float,
     audio_dur: float,
     max_chars: int = 9,
+    punch_mode: Optional[str] = None,
 ) -> List[TimedLine]:
     enriched = []
     for raw in aligned:
@@ -2183,11 +2211,18 @@ def prepare_lines(
         assign_style_layouts(lines, style)
     rf = style.get("reveal_frac")
     mpc = style.get("max_per_char")
-    assign_chunk_times(
-        lines,
-        reveal_frac=float(rf) if rf is not None else REVEAL_FRAC,
-        max_per_char=float(mpc) if mpc is not None else MAX_PER_CHAR,
-    )
+    reveal_frac = float(rf) if rf is not None else REVEAL_FRAC
+    max_per_char = float(mpc) if mpc is not None else MAX_PER_CHAR
+    mode = (punch_mode or style.get("punch_mode") or "uniform")
+    mode = str(mode).strip().lower()
+    if mode == "rhythm":
+        assign_chunk_times_rhythm(
+            lines, reveal_frac=reveal_frac, max_per_char=max_per_char
+        )
+    else:
+        assign_chunk_times(
+            lines, reveal_frac=reveal_frac, max_per_char=max_per_char
+        )
     return lines
 
 
@@ -2214,6 +2249,7 @@ def render_mv(
     height: int = 1920,
     fps: int = 24,
     gap_mode: Optional[str] = None,
+    punch_mode: Optional[str] = None,
 ) -> Path:
     """Full render pipeline → final mp4 at `out`."""
     _require_ffmpeg()
@@ -2253,7 +2289,12 @@ def render_mv(
         )
 
     lines = prepare_lines(
-        aligned, style, lead=lead, audio_dur=audio_dur, max_chars=max_chars
+        aligned,
+        style,
+        lead=lead,
+        audio_dur=audio_dur,
+        max_chars=max_chars,
+        punch_mode=punch_mode,
     )
 
     # Auto title: hold until title_before_lyric seconds before first lyric.
