@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from ..styles import is_poster_fill, list_builtin_styles, load_style
+from .audio_ext import ALLOWED_AUDIO_SUFFIXES, MIME_TO_SUFFIX, assert_audio_allowed, resolve_audio_suffix
 from .fonts import discover_fonts
 from .jobs import manager
 from .lyrics import detect_lyrics_kind
@@ -91,6 +92,33 @@ def create_app() -> FastAPI:
         if not audio_bytes:
             raise HTTPException(status_code=400, detail="audio file is empty")
 
+        audio_name = audio.filename or "audio"
+        content_type = audio.content_type
+        allowed = ", ".join(sorted(ALLOWED_AUDIO_SUFFIXES))
+        unsupported_detail = (
+            f"unsupported audio type; allowed formats: {allowed} "
+            "(including webm for browser recordings)"
+        )
+        try:
+            suffix = resolve_audio_suffix(
+                audio_name,
+                content_type=content_type,
+                data=audio_bytes,
+            )
+            assert_audio_allowed(suffix)
+        except ValueError as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{unsupported_detail}. ({e})",
+            ) from e
+
+        # Reject explicit non-audio filename extensions unless MIME/magic overrode.
+        name_ext = Path(audio_name).suffix.lower().lstrip(".")
+        mime = (content_type or "").split(";", 1)[0].strip().lower()
+        if name_ext and name_ext not in ALLOWED_AUDIO_SUFFIXES:
+            if mime not in MIME_TO_SUFFIX and suffix == ".mp3":
+                raise HTTPException(status_code=400, detail=unsupported_detail)
+
         text = (lyrics_text or "").strip()
         if lyrics_file is not None:
             raw = await lyrics_file.read()
@@ -114,9 +142,10 @@ def create_app() -> FastAPI:
 
         job = manager.create(
             audio_bytes=audio_bytes,
-            audio_name=audio.filename or "audio.mp3",
+            audio_name=audio_name if Path(audio_name).suffix else f"audio{suffix}",
             lyrics_text=text,
             options=opts,
+            audio_content_type=content_type,
         )
         return job.to_dict()
 

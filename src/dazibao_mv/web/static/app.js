@@ -197,12 +197,31 @@
     return true; // error — stop
   }
 
+
+  function isAllowedAudioFile(file) {
+    if (!file) return false;
+    const name = (file.name || "").toLowerCase();
+    const type = (file.type || "").toLowerCase();
+    const exts = [".mp3", ".wav", ".m4a", ".flac", ".ogg", ".opus", ".webm", ".aac", ".wma"];
+    if (exts.some((ext) => name.endsWith(ext))) return true;
+    if (type.includes("webm")) return true;
+    if (type.startsWith("audio/")) return true;
+    // No extension / empty type — let the server decide (e.g. MediaRecorder blobs)
+    if (!name.includes(".") || !type) return true;
+    return false;
+  }
+
   async function onSubmit() {
     $("formError").textContent = "";
     resetResult();
     const audio = $("audio").files[0];
     if (!audio) {
       $("formError").textContent = "请选择音频文件";
+      return;
+    }
+    if (!isAllowedAudioFile(audio)) {
+      $("formError").textContent =
+        "不支持的音频格式（可用 MP3 / WAV / WebM / M4A / FLAC / OGG / Opus 等）";
       return;
     }
     const lyricsFile = $("lyricsFile").files[0];

@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional
 from ..align import save_aligned, save_srt
 from ..render import render_mv
 from ..styles import load_style, resolve_font
+from .audio_ext import resolve_audio_suffix
 from .lyrics import prepare_aligned_from_lyrics
 
 
@@ -137,6 +138,7 @@ class JobManager:
         audio_name: str,
         lyrics_text: str,
         options: Dict[str, Any],
+        audio_content_type: Optional[str] = None,
     ) -> Job:
         job_id = uuid.uuid4().hex[:12]
         work = data_root() / job_id
@@ -145,7 +147,11 @@ class JobManager:
         work.mkdir(parents=True, exist_ok=True)
 
         # persist uploads
-        suffix = Path(audio_name or "audio.mp3").suffix or ".mp3"
+        suffix = resolve_audio_suffix(
+            audio_name or "",
+            content_type=audio_content_type,
+            data=audio_bytes,
+        )
         audio_path = work / f"audio{suffix}"
         audio_path.write_bytes(audio_bytes)
         (work / "lyrics.txt").write_text(lyrics_text, encoding="utf-8")

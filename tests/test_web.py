@@ -12,6 +12,7 @@ fastapi = pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient  # noqa: E402
 
 from dazibao_mv.web.app import create_app
+from dazibao_mv.web.audio_ext import resolve_audio_suffix
 from dazibao_mv.web.lyrics import detect_lyrics_kind, parse_lrc, prepare_aligned_from_lyrics
 
 
@@ -179,3 +180,40 @@ def test_static_index(client):
     r = client.get("/")
     assert r.status_code == 200
     assert "大字报" in r.text or "dazibao" in r.text.lower()
+
+
+def test_resolve_audio_suffix_webm_filename():
+    assert resolve_audio_suffix("rec.webm") == ".webm"
+
+
+def test_resolve_audio_suffix_webm_mime():
+    assert resolve_audio_suffix("blob", "audio/webm") == ".webm"
+    assert resolve_audio_suffix("blob", "video/webm") == ".webm"
+
+
+def test_resolve_audio_suffix_webm_magic():
+    # EBML header used by WebM / Matroska
+    data = b"\x1a\x45\xdf\xa3" + b"\x00" * 16
+    assert resolve_audio_suffix("blob", None, data=data) == ".webm"
+
+
+def test_job_create_webm_writes_audio_webm(client, monkeypatch):
+    """POST clip.webm + lyrics creates job and persists audio.webm under work dir."""
+    from dazibao_mv.web import app as app_mod
+    from dazibao_mv.web import jobs as jobs_mod
+
+    # App holds its own manager reference; stop the worker before create runs.
+    monkeypatch.setattr(app_mod.manager._pool, "submit", lambda *a, **k: None)
+
+    webm_bytes = b"\x1a\x45\xdf\xa3" + b"fake-webm-opus"
+    audio = ("clip.webm", io.BytesIO(webm_bytes), "audio/webm")
+    r = client.post(
+        "/api/jobs",
+        files={"audio": audio},
+        data={"lyrics_text": "[00:01.00]一句\n[00:03.00]两句"},
+    )
+    assert r.status_code == 200, r.text
+    job_id = r.json()["id"]
+    audio_path = jobs_mod.data_root() / job_id / "audio.webm"
+    assert audio_path.is_file()
+    assert audio_path.read_bytes() == webm_bytes

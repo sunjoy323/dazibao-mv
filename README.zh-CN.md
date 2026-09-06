@@ -195,7 +195,7 @@ palettes:
 
 ## Web 模式（浏览器）
 
-上传 MP3 + 歌词 → 后端对齐并渲染 → 预览 / 下载。界面为中文标签。
+上传 MP3 / WAV / WebM（浏览器录音常见）+ 歌词 → 后端对齐并渲染 → 预览 / 下载。界面为中文标签。
 
 ### 本地启动
 
@@ -209,7 +209,7 @@ dazibao-mv serve --host 0.0.0.0 --port 8765
 
 ### 使用流程
 
-1. 选择音频（MP3 / WAV 等）。  
+1. 选择音频（MP3 / WAV / WebM 等；浏览器 `MediaRecorder` 多为 WebM）。  
 2. 粘贴歌词，或上传 `.txt` / `.lrc` / `.srt`。  
 3. 选择风格（象牙 / 砖红 / 黑白 / 海报墙 / neon-cyber / blueprint / pop-comic / ink-wash），可选自定义颜色、字体、标题/作者、间隙模式、Whisper 型号、lite、分辨率。  
 4. 提交 → 轮询任务状态 → 预览视频 → 下载 master（及可选 lite）。

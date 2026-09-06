@@ -179,7 +179,7 @@ Each style YAML defines `verse` / `chorus` / `hook` RGBA, `font`, `hook_keywords
 
 ## Web mode
 
-Friendly browser UI: upload MP3 + lyrics → backend align + render → preview / download.
+Friendly browser UI: upload MP3 / WAV / WebM (browser recordings) + lyrics → backend align + render → preview / download.
 
 ### Run locally
 
@@ -193,7 +193,7 @@ Open **http://127.0.0.1:8765/**.
 
 ### Upload flow
 
-1. Choose an audio file (MP3 / WAV / …).  
+1. Choose an audio file (MP3 / WAV / WebM / … — WebM is common for browser `MediaRecorder` clips).  
 2. Paste lyrics **or** upload `.txt` / `.lrc` / `.srt`.  
 3. Pick a style (ivory / brick / mono / poster-wall / neon-cyber / blueprint / pop-comic / ink-wash), optional color overrides, font, title/author, gap-mode, Whisper model, lite, geometry.  
 4. Submit → poll job status → watch preview → download master (and lite if enabled).
