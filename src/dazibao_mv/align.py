@@ -15,7 +15,12 @@ _SRT_TS = re.compile(
     r"(\d{1,2}):(\d{2}):(\d{2})[,.](\d{1,3})"
 )
 _CJK = re.compile(r"[\u4e00-\u9fff]+")
-_PUNCT_SPLIT = re.compile(r"[，,。.!！？?；;、：:\n\r…—\-]+")
+# Shared punct class for ASR cue splits and word-punct skipping.
+# Includes ASCII/fullwidth CJK marks plus Small Form Variants (U+FE50–U+FE5F)
+# e.g. ﹔ U+FE54 — Whisper often emits these instead of ； U+FF1B — and
+# halfwidth ideographic marks ｡､.
+_PUNCT_CLASS = r"，,。.!！？?；;、：:\n\r…—\-｡､\uFE50-\uFE5F"
+_PUNCT_SPLIT = re.compile(f"[{_PUNCT_CLASS}]+")
 
 
 def _ts_to_sec(h: str, m: str, s: str, ms: str) -> float:
@@ -161,7 +166,7 @@ def _asr_phrase_parts(text: str) -> List[str]:
     return parts
 
 
-_WORD_PUNCT = re.compile(r"[，,。.!！？?；;、：:\n\r…—\-]+")
+_WORD_PUNCT = re.compile(f"[{_PUNCT_CLASS}]+")
 
 
 def _split_cue_by_words(cue: Dict[str, Any], parts: Sequence[str]) -> Optional[List[Dict[str, Any]]]:
@@ -404,7 +409,7 @@ def _pick_sequential_cue(
     cursor: float = 0.0,
     window: int = 16,
     min_ratio: float = 0.32,
-    max_ahead: float = 20.0,
+    max_ahead: float = 6.0,
 ) -> Tuple[Optional[int], float]:
     """Return (index, ratio) for the next lyric — earliest acceptable match.
 
@@ -518,7 +523,7 @@ def match_lyrics_to_cues(
             # Prefer the earliest cue above threshold so repeated chorus
             # lines cannot jump ahead to a later identical occurrence and
             # orphan the bridge that sits between them in the ASR stream.
-            best_j, best_r = _pick_sequential_cue(nt, cues, ai, cursor=cursor, window=16, max_ahead=20.0)
+            best_j, best_r = _pick_sequential_cue(nt, cues, ai, cursor=cursor, window=16, max_ahead=6.0)
 
         if best_j is not None and best_r >= 0.32:
             start = float(cues[best_j]["start"])
