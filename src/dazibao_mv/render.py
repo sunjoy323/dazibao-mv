@@ -1448,18 +1448,48 @@ def _scale_rgba(color: Tuple[int, ...], alpha_scale: float) -> Tuple[int, ...]:
 
 
 
-def title_anim_phases(title_dur: float, fade_dur: float) -> Tuple[float, float, float]:
+def title_anim_phases(
+    title_dur: float,
+    fade_dur: float,
+    *,
+    title_punch_max: float = 2.0,
+    author_max: float = 1.0,
+) -> Tuple[float, float, float]:
     """Return (title_end, author_end, usable) seconds within the title card.
 
     Timeline before fade:
-      0 → ~45% usable: song title glyph punch
-      ~45% → ~70%: author typewriter
+      0 → title_end: song title glyph punch (≤ title_punch_max, default 2s)
+      title_end → author_end: author typewriter (≤ author_max, default 1s)
       rest → hold, then fade_dur fade-out
+
+    Long title cards stay snappy (punch capped); short cards scale down but
+    keep punchy — shrink author first, then title (title still ≤ max).
     """
     fade = max(0.0, min(float(fade_dur), max(0.0, float(title_dur) - 0.05)))
     usable = max(0.05, float(title_dur) - fade)
-    title_end = usable * 0.45
-    author_end = usable * 0.70
+    punch_max = max(0.05, float(title_punch_max))
+    auth_max = max(0.0, float(author_max))
+
+    title_end = min(punch_max, usable)
+    # Prefer a quick author beat after title when there is leftover time
+    leftover = max(0.0, usable - title_end)
+    if leftover > 0:
+        author_span = min(auth_max, max(0.15, leftover) if leftover >= 0.15 else leftover)
+    else:
+        author_span = 0.0
+
+    if title_end + author_span > usable:
+        # Shrink author first
+        author_span = max(0.0, usable - title_end)
+
+    # Very short cards: squeeze a minimal author window, keep title punchy
+    if author_span < 0.15 and usable >= 0.5 and auth_max > 0:
+        author_span = min(auth_max, max(0.15, usable * 0.25))
+        title_end = min(punch_max, max(0.2, usable - author_span))
+        if title_end + author_span > usable:
+            author_span = max(0.0, usable - title_end)
+
+    author_end = min(usable, title_end + author_span)
     return title_end, author_end, usable
 
 

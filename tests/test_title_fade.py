@@ -49,12 +49,41 @@ def test_title_fade_alpha_full_then_drops():
     assert a0 > a1 > last
 
 
-def test_title_anim_phases_scale_with_dur():
+def test_title_anim_phases_long_card_caps_punch():
+    """Long auto title (~18s): punch ≤2s, author ≤1s, rest hold."""
+    te, ae, usable = title_anim_phases(18.0, 0.8)
+    assert abs(usable - 17.2) < 1e-6
+    assert te <= 2.0
+    assert ae - te <= 1.0 + 1e-6
+    assert te < ae < usable
+    # all glyphs revealed by ~3s (title+author)
+    assert ae <= 3.0 + 1e-6
+
+
+def test_title_anim_phases_short_card_still_punchy():
+    """Short card (5s): still punchy under caps, author after title."""
     te, ae, usable = title_anim_phases(5.0, 0.8)
     assert abs(usable - 4.2) < 1e-6
-    assert abs(te - usable * 0.45) < 1e-6
-    assert abs(ae - usable * 0.70) < 1e-6
-    assert te < ae < usable
+    assert te <= 2.0
+    assert ae - te <= 1.0 + 1e-6
+    assert te < ae <= usable
+    # keep punchy (not the old 45% of usable ≈ 1.89 — still fine; just ensure order)
+    assert te >= 0.35
+
+
+def test_title_reveal_counts_full_by_two_seconds_long_title():
+    """11-glyph title fully revealed by t=2.0 on a long title card."""
+    title = "谁又不曾是别人的白月光"  # 11 glyphs
+    n_title = len(title)
+    assert n_title == 11
+    title_dur, fade_dur = 18.0, 0.8
+    te, ae, usable = title_anim_phases(title_dur, fade_dur)
+    assert te <= 2.0
+    n_t, n_a, _punch = title_reveal_counts(
+        2.0, title_dur=title_dur, fade_dur=fade_dur, n_title=n_title, n_author=3
+    )
+    assert n_t == n_title
+    assert n_a == 0 or ae <= 2.0  # author may start after title_end
 
 
 def test_title_reveal_counts_title_then_author():
