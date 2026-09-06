@@ -104,7 +104,7 @@ def test_split_asr_cues_on_whitespace():
 def test_repeated_chorus_does_not_skip_bridge():
     """Identical chorus lines must not jump to a later chorus over the bridge."""
     # Closing bar is one 老登 + 硬骨头; an extra lyric 老登 must not leap to chorus 3.
-    # Later chorus sits just beyond bridge (within max_ahead=6 of cursor ~245).
+    # Later chorus sits just beyond bridge (within max_ahead of cursor ~245).
     lyrics = [
         "八零后的老登",
         "硬骨头敬此生",
@@ -174,3 +174,31 @@ def test_merged_small_semicolon_chorus_second_line_before_270():
     assert second[0]["start"] < 270.0, second[0]
     # With split, second half starts inside the cue window (~264–268), not ~278.
     assert second[0]["start"] < 268.0, second[0]
+
+def test_merged_no_punct_chorus_reuses_remainder_with_words():
+    """Concatenated chorus halves (no ﹔) still place second line before 270 via remainder."""
+    lyrics = ["我也曾站在风里", "被谁当成遥不可及的向往"]
+    words = []
+    # Approximate Whisper word timings for 262.20–267.66 merged blob
+    timeline = [
+        ("我也", 262.24, 262.68), ("曾", 262.68, 262.96), ("站", 262.96, 263.20),
+        ("在", 263.20, 263.40), ("风", 263.40, 263.68), ("里", 263.68, 263.90),
+        ("被", 263.90, 264.16), ("谁", 264.16, 264.38), ("当", 264.38, 264.64),
+        ("成", 264.64, 264.90), ("遥", 264.90, 265.26), ("不", 265.26, 265.64),
+        ("可", 265.64, 266.04), ("及", 266.04, 266.20), ("的", 266.20, 266.70),
+        ("向", 266.70, 267.10), ("往", 267.10, 267.62),
+    ]
+    words = [{"word": w, "start": s, "end": e} for w, s, e in timeline]
+    cues = [{
+        "start": 262.20,
+        "end": 267.66,
+        "text": "我也曾站在风里被谁当成遥不可及的向往。",
+        "words": words,
+    }]
+    aligned = match_lyrics_to_cues(lyrics, cues, max_chars=12, max_line_sec=5.5)
+    second = [a for a in aligned if "遥不可及" in a["text"] or "被谁当成" in a["text"]]
+    assert second, aligned
+    assert second[0]["start"] < 270.0, second[0]
+    assert second[0]["start"] < 268.0, second[0]
+    assert aligned[0]["end"] <= second[0]["start"] + 0.05
+

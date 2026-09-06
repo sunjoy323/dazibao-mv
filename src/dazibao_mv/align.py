@@ -401,6 +401,46 @@ def lyric_subspan_from_words(
     return st, en
 
 
+
+def _cue_remainder_after_lyric(
+    cue: Dict[str, Any],
+    lyric: str,
+    consumed_end: float,
+) -> Optional[Dict[str, Any]]:
+    """If ``cue`` still has a trailing phrase after ``lyric``, return residual cue.
+
+    Used when Whisper merges two chorus halves into one segment (with or without
+    punctuation). After the first half claims a word-subspan, the unmatched tail
+    is re-inserted so the next lyric can reuse it instead of leaping ahead.
+    """
+    nt = _normalize(lyric)
+    cue_norm = _normalize(cue.get("text") or "")
+    if not nt or not cue_norm:
+        return None
+    idx = cue_norm.find(nt)
+    if idx < 0:
+        return None
+    rem_norm = cue_norm[idx + len(nt) :]
+    if len(rem_norm) < 4:
+        return None
+    orig_end = float(cue["end"])
+    rem_start = max(float(consumed_end), float(cue["start"]))
+    if orig_end - rem_start < 0.2:
+        return None
+    words = cue.get("words") or []
+    rem_words = [w for w in words if float(w["start"]) >= rem_start - 0.05]
+    if rem_words:
+        rem_start = min(rem_start, float(rem_words[0]["start"]))
+    item: Dict[str, Any] = {
+        "start": rem_start,
+        "end": orig_end,
+        "text": rem_norm,
+    }
+    if rem_words:
+        item["words"] = rem_words
+    return item
+
+
 def _pick_sequential_cue(
     nt: str,
     cues: Sequence[Dict[str, Any]],
@@ -409,7 +449,7 @@ def _pick_sequential_cue(
     cursor: float = 0.0,
     window: int = 16,
     min_ratio: float = 0.32,
-    max_ahead: float = 6.0,
+    max_ahead: float = 14.0,
 ) -> Tuple[Optional[int], float]:
     """Return (index, ratio) for the next lyric — earliest acceptable match.
 
@@ -421,6 +461,8 @@ def _pick_sequential_cue(
     ``max_ahead`` further refuses matches whose cue start is too far past the
     current cursor, so an extra repeated lyric (ASR merged two lines) falls
     back to a short synthetic span instead of leaping over the bridge.
+    Default is 14s: tight enough to block ~20s chorus leaps when remainder
+    reuse cannot fire, but loose enough for sparse ASR gaps on real tracks.
     """
     end = min(ai + window, len(cues))
     best_j: Optional[int] = None
@@ -471,20 +513,21 @@ def match_lyrics_to_cues(
                 best_j = fj
                 best_r = _cue_similarity(nt, cues[fj].get("text") or "")
                 # Overlong early blobs (intro bleed) → word subspan / onset / end-anchor.
+                # Do not shrink the cue in place here: the shared consume path applies
+                # subspan + remainder reuse so a merged first cue can feed lyric 2.
                 st = float(cues[fj]["start"])
                 en = float(cues[fj]["end"])
                 expect = expected_line_dur(raw, max_sec=max_line_sec)
                 sub = lyric_subspan_from_words(raw, cues[fj])
                 word_onset = first_lyric_onset_from_words(cues[fj])
-                cues[fj] = dict(cues[fj])
                 if sub is not None:
-                    sub_st, sub_en = sub
-                    if word_onset is not None and word_onset > sub_st + 0.15:
-                        sub_st = word_onset
-                    cues[fj]["start"] = sub_st
-                    cues[fj]["end"] = sub_en
                     anchor = "start"
+                    # Stash onset preference on a shallow copy without dropping remainder text.
+                    if word_onset is not None and word_onset > sub[0] + 0.15:
+                        cues[fj] = dict(cues[fj])
+                        cues[fj]["start"] = word_onset
                 elif word_onset is not None and word_onset > st + 0.3:
+                    cues[fj] = dict(cues[fj])
                     cues[fj]["start"] = word_onset
                     anchor = "start"
                 elif (en - st) > expect + 0.8 and st < 22.0:
@@ -505,15 +548,13 @@ def match_lyrics_to_cues(
                     expect = expected_line_dur(raw, max_sec=max_line_sec)
                     sub = lyric_subspan_from_words(raw, cues[best_j])
                     word_onset = first_lyric_onset_from_words(cues[best_j])
-                    cues[best_j] = dict(cues[best_j])
                     if sub is not None:
-                        sub_st, sub_en = sub
-                        if word_onset is not None and word_onset > sub_st + 0.15:
-                            sub_st = word_onset
-                        cues[best_j]["start"] = sub_st
-                        cues[best_j]["end"] = sub_en
                         anchor = "start"
+                        if word_onset is not None and word_onset > sub[0] + 0.15:
+                            cues[best_j] = dict(cues[best_j])
+                            cues[best_j]["start"] = word_onset
                     elif word_onset is not None and word_onset > st + 0.3:
+                        cues[best_j] = dict(cues[best_j])
                         cues[best_j]["start"] = word_onset
                         anchor = "start"
                     elif (en - st) > expect + 0.8 and st < 22.0:
@@ -523,13 +564,30 @@ def match_lyrics_to_cues(
             # Prefer the earliest cue above threshold so repeated chorus
             # lines cannot jump ahead to a later identical occurrence and
             # orphan the bridge that sits between them in the ASR stream.
-            best_j, best_r = _pick_sequential_cue(nt, cues, ai, cursor=cursor, window=16, max_ahead=6.0)
+            best_j, best_r = _pick_sequential_cue(nt, cues, ai, cursor=cursor, window=16, max_ahead=14.0)
 
         if best_j is not None and best_r >= 0.32:
-            start = float(cues[best_j]["start"])
-            end = float(cues[best_j]["end"])
-            start, end = cap_span(start, end, raw, max_sec=max_line_sec, anchor=anchor)
-            ai = best_j + 1
+            cue = cues[best_j]
+            orig_end = float(cue["end"])
+            sub = lyric_subspan_from_words(raw, cue)
+            if sub is not None:
+                start, end = sub
+                # Honor intro-bleed onset if first-lyric path raised cue start.
+                cue_st = float(cue["start"])
+                if cue_st > start + 0.15:
+                    start = cue_st
+            else:
+                start = float(cue["start"])
+                end = orig_end
+                start, end = cap_span(start, end, raw, max_sec=max_line_sec, anchor=anchor)
+            # If this cue still has an unmatched trailing phrase, keep it at
+            # best_j for the next lyric (remainder reuse) instead of advancing.
+            rem = _cue_remainder_after_lyric(cue, raw, end)
+            if rem is not None:
+                cues[best_j] = rem
+                ai = best_j
+            else:
+                ai = best_j + 1
             cursor = end
         else:
             start = cursor
