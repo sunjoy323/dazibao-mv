@@ -96,6 +96,10 @@ def _cue_similarity(lyric_norm: str, cue_text: str) -> float:
     if lyric_norm in nc or nc in lyric_norm:
         len_ratio = min(len(lyric_norm), len(nc)) / max(len(lyric_norm), len(nc))
         r = max(r, 0.55 + 0.4 * len_ratio)
+    # Prefer cues that match the lyric's leading phrase (ASR punct splits).
+    if nc and lyric_norm.startswith(nc):
+        len_ratio = len(nc) / max(len(lyric_norm), 1)
+        r = max(r, 0.82 + 0.15 * len_ratio)
     return r
 
 
@@ -157,8 +161,86 @@ def _asr_phrase_parts(text: str) -> List[str]:
     return parts
 
 
+_WORD_PUNCT = re.compile(r"[，,。.!！？?；;、：:\n\r…—\-]+")
+
+
+def _split_cue_by_words(cue: Dict[str, Any], parts: Sequence[str]) -> Optional[List[Dict[str, Any]]]:
+    """Split one ASR cue into sub-cues using word-timestamp boundaries on punct.
+
+    When Whisper merges two clauses (e.g. 「路边摊的油烟，熏黄了夹克领口」)
+    into one segment, word timestamps still mark the real break near the comma.
+    """
+    words = cue.get("words") or []
+    if len(parts) <= 1 or len(words) < 2:
+        return None
+    # Build cumulative CJK/alnum char stream from words (skip pure punct words).
+    char_words: List[Tuple[str, Dict[str, Any]]] = []
+    for w in words:
+        raw = (w.get("word") or "").strip()
+        if not raw:
+            continue
+        if _WORD_PUNCT.fullmatch(raw):
+            # punct-only word: mark a soft break candidate at this boundary
+            char_words.append(("", w))
+            continue
+        for ch in raw:
+            if _normalize(ch):
+                char_words.append((ch, w))
+            elif _WORD_PUNCT.match(ch):
+                char_words.append(("", w))
+    if not char_words:
+        return None
+
+    out: List[Dict[str, Any]] = []
+    wi = 0  # index into char_words
+    cue_start, cue_end = float(cue["start"]), float(cue["end"])
+    for pi, part in enumerate(parts):
+        need = list(_normalize(part))
+        if not need:
+            continue
+        matched_words: List[Dict[str, Any]] = []
+        for ch in need:
+            # skip punct markers in the word stream
+            while wi < len(char_words) and char_words[wi][0] == "":
+                wi += 1
+            if wi >= len(char_words):
+                return None  # cannot map; fall back to char-weight
+            got, wobj = char_words[wi]
+            if got != ch:
+                # fuzzy: allow mismatch but still consume one char slot
+                pass
+            if not matched_words or matched_words[-1] is not wobj:
+                matched_words.append(wobj)
+            wi += 1
+        # consume a following punct marker so the next part starts after it
+        while wi < len(char_words) and char_words[wi][0] == "":
+            wi += 1
+        if not matched_words:
+            return None
+        st = float(matched_words[0]["start"])
+        en = float(matched_words[-1]["end"])
+        if pi == 0:
+            st = min(st, cue_start)
+        if pi == len(parts) - 1:
+            en = max(en, cue_end)
+        if en <= st:
+            en = st + 0.25
+        out.append({
+            "start": st,
+            "end": en,
+            "text": part,
+            "words": list(matched_words),
+        })
+    return out if len(out) == len([p for p in parts if _normalize(p)]) else None
+
+
 def split_asr_cues(cues: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Split long ASR segments on punctuation/whitespace, by char weight."""
+    """Split long ASR segments on punctuation/whitespace.
+
+    When word timestamps exist, break on ``，。！？、；`` (and comma in word text)
+    using real word boundaries so merged verse cues become separate timed phrases.
+    Otherwise fall back to character-weight redistribution.
+    """
     out: List[Dict[str, Any]] = []
     for c in cues:
         text = (c.get("text") or "").strip()
@@ -169,6 +251,10 @@ def split_asr_cues(cues: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
             if c.get("words"):
                 item["words"] = list(c["words"])
             out.append(item)
+            continue
+        by_words = _split_cue_by_words(c, parts)
+        if by_words is not None:
+            out.extend(by_words)
             continue
         weights = [max(1, len(_normalize(p)) or len(p)) for p in parts]
         total = sum(weights)
@@ -206,34 +292,108 @@ def redistribute_times(
 def first_lyric_onset_from_words(
     cue: Dict[str, Any],
     *,
-    max_word_dur: float = 1.5,
+    max_word_dur: float = 1.0,
 ) -> Optional[float]:
     """Skip Whisper intro-bleed word timestamps; return real sung onset.
 
     Faster-whisper often parks the first glyphs at the segment start with a
-    tiny duration, then stretches the next word across the instrumental gap.
-    Skip leading words with absurd duration (or micro+mega pairs) and use the
-    first remaining word start.
+    stretched duration across the instrumental gap (e.g. 路 15.16–16.38 = 1.22s).
+    Skip leading bleed words and use the first remaining word start.
+    """
+    words = [w for w in (cue.get("words") or []) if (w.get("word") or "").strip()]
+    # Ignore pure-punctuation words for duration stats / onset
+    content = []
+    for w in words:
+        raw = (w.get("word") or "").strip()
+        if _WORD_PUNCT.fullmatch(raw):
+            continue
+        content.append(w)
+    if len(content) < 2:
+        return None
+    durs = [max(0.0, float(w["end"]) - float(w["start"])) for w in content]
+    durs_sorted = sorted(durs)
+    mid = durs_sorted[len(durs_sorted) // 2]
+    median_cap = max(0.85, 2.0 * mid)
+    cue_start = float(cue.get("start", content[0]["start"]))
+    i = 0
+    n = len(content)
+    skipped = False
+    while i < n - 1:
+        w = content[i]
+        dur = float(w["end"]) - float(w["start"])
+        nxt = content[i + 1]
+        nxt_dur = float(nxt["end"]) - float(nxt["start"])
+        parked = abs(float(w["start"]) - cue_start) < 0.05 and dur > 0.8
+        bleed = (
+            dur > max_word_dur
+            or dur > median_cap
+            or parked
+            or (dur < 0.08 and nxt_dur > max_word_dur)
+        )
+        if bleed:
+            i += 1
+            skipped = True
+            continue
+        break
+    onset = float(content[i]["start"])
+    # Correction when we skipped bleed, or first kept word is clearly after cue start
+    if skipped or onset > cue_start + 0.3:
+        return onset
+    return None
+
+
+def lyric_subspan_from_words(
+    lyric: str,
+    cue: Dict[str, Any],
+) -> Optional[Tuple[float, float]]:
+    """Map lyric characters onto cue words (ignore punct); return timed subspan.
+
+    Strongest fix when one ASR cue covers multiple lyric phrases: locate the
+    glyph run that matches the lyric and use those word start/end times.
     """
     words = cue.get("words") or []
     if len(words) < 2:
         return None
-    i = 0
-    n = len(words)
-    while i < n - 1:
-        w = words[i]
-        dur = float(w["end"]) - float(w["start"])
-        nxt = words[i + 1]
-        nxt_dur = float(nxt["end"]) - float(nxt["start"])
-        if dur > max_word_dur or (dur < 0.08 and nxt_dur > max_word_dur):
-            i += 1
-            continue
-        break
-    onset = float(words[i]["start"])
-    # Only treat as a correction when we actually skipped bleed
-    if i == 0:
+    want = _normalize(lyric)
+    if not want:
         return None
-    return onset
+    # Flatten content words into a char→word index (skip punct-only tokens).
+    chars: List[str] = []
+    owners: List[Dict[str, Any]] = []
+    for w in words:
+        raw = (w.get("word") or "").strip()
+        if not raw or _WORD_PUNCT.fullmatch(raw):
+            continue
+        for ch in raw:
+            n = _normalize(ch)
+            if not n:
+                continue
+            chars.append(n)
+            owners.append(w)
+    stream = "".join(chars)
+    if not stream:
+        return None
+    idx = stream.find(want)
+    if idx < 0:
+        # Prefix fallback: longest prefix of lyric found in stream
+        idx = -1
+        for L in range(len(want), max(1, len(want) // 2) - 1, -1):
+            j = stream.find(want[:L])
+            if j >= 0:
+                idx = j
+                want = want[:L]
+                break
+        if idx < 0:
+            return None
+    i0 = idx
+    i1 = idx + len(want) - 1
+    if i1 >= len(owners):
+        return None
+    st = float(owners[i0]["start"])
+    en = float(owners[i1]["end"])
+    if en <= st:
+        en = st + 0.25
+    return st, en
 
 
 def _pick_sequential_cue(
@@ -305,18 +465,29 @@ def match_lyrics_to_cues(
             if fj is not None:
                 best_j = fj
                 best_r = _cue_similarity(nt, cues[fj].get("text") or "")
-                # Overlong early blobs (intro bleed) → prefer word onset, else end-anchor.
+                # Overlong early blobs (intro bleed) → word subspan / onset / end-anchor.
                 st = float(cues[fj]["start"])
                 en = float(cues[fj]["end"])
                 expect = expected_line_dur(raw, max_sec=max_line_sec)
+                sub = lyric_subspan_from_words(raw, cues[fj])
                 word_onset = first_lyric_onset_from_words(cues[fj])
-                if word_onset is not None and word_onset > st + 0.3:
-                    # Stash corrected start onto cue for cap/match below
-                    cues[fj] = dict(cues[fj])
+                cues[fj] = dict(cues[fj])
+                if sub is not None:
+                    sub_st, sub_en = sub
+                    if word_onset is not None and word_onset > sub_st + 0.15:
+                        sub_st = word_onset
+                    cues[fj]["start"] = sub_st
+                    cues[fj]["end"] = sub_en
+                    anchor = "start"
+                elif word_onset is not None and word_onset > st + 0.3:
                     cues[fj]["start"] = word_onset
                     anchor = "start"
-                elif (en - st) > expect + 0.8 and st < 15.0:
+                elif (en - st) > expect + 0.8 and st < 22.0:
+                    # Raise floor from 15→22: bleed blobs often start just after 15s.
                     anchor = "end"
+                elif (en - st) > expect + 0.8:
+                    # Last resort: keep start, shorten to expect (cap_span default).
+                    anchor = "start"
             else:
                 # fall back to normal window search from ai
                 for j in range(ai, min(ai + 8, len(cues))):
@@ -327,7 +498,20 @@ def match_lyrics_to_cues(
                     st = float(cues[best_j]["start"])
                     en = float(cues[best_j]["end"])
                     expect = expected_line_dur(raw, max_sec=max_line_sec)
-                    if (en - st) > expect + 0.8 and st < 15.0:
+                    sub = lyric_subspan_from_words(raw, cues[best_j])
+                    word_onset = first_lyric_onset_from_words(cues[best_j])
+                    cues[best_j] = dict(cues[best_j])
+                    if sub is not None:
+                        sub_st, sub_en = sub
+                        if word_onset is not None and word_onset > sub_st + 0.15:
+                            sub_st = word_onset
+                        cues[best_j]["start"] = sub_st
+                        cues[best_j]["end"] = sub_en
+                        anchor = "start"
+                    elif word_onset is not None and word_onset > st + 0.3:
+                        cues[best_j]["start"] = word_onset
+                        anchor = "start"
+                    elif (en - st) > expect + 0.8 and st < 22.0:
                         anchor = "end"
             first_lyric_done = True
         elif cues:
