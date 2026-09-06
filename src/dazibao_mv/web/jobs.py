@@ -18,6 +18,7 @@ from ..render import render_mv
 from ..styles import load_style, resolve_font
 from .audio_ext import resolve_audio_suffix
 from .lyrics import prepare_aligned_from_lyrics
+from ..split import clean_lyrics_text
 
 
 def data_root() -> Path:
@@ -154,6 +155,10 @@ class JobManager:
         )
         audio_path = work / f"audio{suffix}"
         audio_path.write_bytes(audio_bytes)
+        # Auto-clean pasted/uploaded plain lyrics ([Intro] / English notes)
+        from .lyrics import detect_lyrics_kind
+        if detect_lyrics_kind(lyrics_text) == "plain":
+            lyrics_text = "\n".join(clean_lyrics_text(lyrics_text)) + "\n"
         (work / "lyrics.txt").write_text(lyrics_text, encoding="utf-8")
         (work / "options.json").write_text(
             json.dumps(options, ensure_ascii=False, indent=2) + "\n",
@@ -228,6 +233,7 @@ class JobManager:
                 height=int(opts.get("height") or 1920),
                 fps=int(opts.get("fps") or 24),
                 gap_mode=str(opts.get("gap_mode") or "auto"),
+                punch_mode=str(opts.get("punch_mode") or "uniform"),
             )
             self._update(job, status="done", message="done")
         except Exception as e:

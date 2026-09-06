@@ -101,10 +101,60 @@ def split_lyrics(lines: List[str], max_chars: int = 9) -> List[str]:
     return result
 
 
-def load_lyrics_file(path: str) -> List[str]:
-    """Load non-empty lyric lines from a text file."""
+_BRACKET_LINE = re.compile(r"^\[(.*)\]$")
+
+
+def _is_section_or_production_note(line: str) -> bool:
+    """True for full-line ``[Intro]`` / ``[Slow acoustic…]`` style tags.
+
+    Keeps lines that contain CJK inside the brackets (rare lyric markup).
+    """
+    m = _BRACKET_LINE.match(line.strip())
+    if not m:
+        return False
+    inner = m.group(1).strip()
+    if not inner:
+        return True
+    if any("\u4e00" <= c <= "\u9fff" for c in inner):
+        return False
+    # Mostly ASCII letters / digits / punctuation → section tag or English note
+    non_space = [c for c in inner if not c.isspace()]
+    if not non_space:
+        return True
+    ascii_count = sum(1 for c in non_space if ord(c) < 128)
+    return ascii_count / len(non_space) >= 0.7
+
+
+def clean_lyrics_text(text: str) -> List[str]:
+    """Strip section tags and English production notes; keep Chinese lyrics.
+
+    Drops lines that are **only** bracket tags (``[Intro]``, ``[Verse 1]``,
+    ``[Chorus]``, ``[Fade Out]``, ``[End]``, …) or bracketed English
+    production notes (``[Slow acoustic guitar…]``). Preserves Chinese lyric
+    lines (including punctuation like ``！``). Blank / ``#`` comments skipped.
+    """
+    out: List[str] = []
+    for ln in (text or "").splitlines():
+        s = ln.strip()
+        if not s or s.startswith("#"):
+            continue
+        if _is_section_or_production_note(s):
+            continue
+        out.append(s)
+    return out
+
+
+def load_lyrics_file(path: str, *, clean: bool = True) -> List[str]:
+    """Load non-empty lyric lines from a text file.
+
+    By default runs :func:`clean_lyrics_text` so ``[Intro]`` / English
+    production notes are stripped. Pass ``clean=False`` for raw lines.
+    """
     with open(path, "r", encoding="utf-8") as f:
-        return [ln.strip() for ln in f if ln.strip() and not ln.strip().startswith("#")]
+        raw = f.read()
+    if clean:
+        return clean_lyrics_text(raw)
+    return [ln.strip() for ln in raw.splitlines() if ln.strip() and not ln.strip().startswith("#")]
 
 
 def glyph_chunks(text: str) -> List[str]:

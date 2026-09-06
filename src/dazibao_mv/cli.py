@@ -10,6 +10,7 @@ from pathlib import Path
 from . import __version__
 from .align import align, save_aligned, save_srt
 from .render import render_mv
+from .split import clean_lyrics_text, load_lyrics_file
 from .styles import list_builtin_styles, load_style
 
 
@@ -46,24 +47,33 @@ def _cmd_align(args: argparse.Namespace) -> int:
 def _cmd_render(args: argparse.Namespace) -> int:
     style = load_style(args.style, style_file=args.style_file)
 
-    aligned = align(
-        audio=args.audio,
-        lyrics_path=args.lyrics,
-        srt=args.srt,
-        max_chars=args.max_chars,
-        whisper_model=getattr(args, "whisper_model", "medium"),
-        initial_prompt=getattr(args, "initial_prompt", None),
-        max_line_sec=getattr(args, "max_line_sec", 5.5),
-    )
-    # cache aligned next to out
     out_path = Path(args.out)
-    cache = out_path.with_suffix(".aligned.json")
-    save_aligned(aligned, cache)
+    aligned_path = getattr(args, "aligned", None)
+    if aligned_path:
+        aligned = json.loads(Path(aligned_path).read_text(encoding="utf-8"))
+        if not isinstance(aligned, list):
+            print("--aligned must be a JSON list of timed lines", file=sys.stderr)
+            return 2
+    else:
+        aligned = align(
+            audio=args.audio,
+            lyrics_path=args.lyrics,
+            srt=args.srt,
+            max_chars=args.max_chars,
+            whisper_model=getattr(args, "whisper_model", "medium"),
+            initial_prompt=getattr(args, "initial_prompt", None),
+            max_line_sec=getattr(args, "max_line_sec", 5.5),
+        )
+        # cache aligned next to out
+        cache = out_path.with_suffix(".aligned.json")
+        save_aligned(aligned, cache)
 
     bg_modes = sum(bool(x) for x in (args.bg, args.bg_generate))
     if bg_modes > 1:
         print("Use only one of --bg / --bg-generate (or neither for --bg-color).", file=sys.stderr)
         return 2
+
+    punch_mode = getattr(args, "punch_mode", None) or "uniform"
 
     render_mv(
         audio=args.audio,
@@ -86,9 +96,21 @@ def _cmd_render(args: argparse.Namespace) -> int:
         height=args.height,
         fps=args.fps,
         gap_mode=args.gap_mode,
+        punch_mode=punch_mode,
     )
     return 0
 
+
+
+
+def _cmd_clean_lyrics(args: argparse.Namespace) -> int:
+    raw = Path(args.in_path).read_text(encoding="utf-8")
+    lines = clean_lyrics_text(raw)
+    out = Path(args.out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+    print(f"Cleaned {len(raw.splitlines())} raw lines → {len(lines)} lyric lines → {out}")
+    return 0
 
 
 def _cmd_serve(args: argparse.Namespace) -> int:
@@ -139,7 +161,7 @@ def build_parser() -> argparse.ArgumentParser:
     # render
     rp = sub.add_parser("render", help="Render kinetic dazibao MV")
     rp.add_argument("--audio", required=True, help="Audio file (mp3/wav/webm/…; anything ffmpeg can read)")
-    rp.add_argument("--lyrics", required=True, help="Lyrics text file")
+    rp.add_argument("--lyrics", required=False, help="Lyrics text file (optional with --aligned)")
     rp.add_argument("--out", required=True, help="Output mp4 path")
     rp.add_argument("--bg", default=None, help="Background image path")
     rp.add_argument("--bg-color", default="#141210", help="Solid background #RRGGBB")
@@ -183,8 +205,25 @@ def build_parser() -> argparse.ArgumentParser:
         default="auto",
         help="Inter-lyric gaps: auto=style default, hold, black/cut matte, or flash (2–3 frame cut)",
     )
+    rp.add_argument(
+        "--punch-mode",
+        choices=("uniform", "rhythm"),
+        default="uniform",
+        help="Glyph reveal timing: uniform (default) or rhythm (Whisper word stamps)",
+    )
+    rp.add_argument(
+        "--aligned",
+        default=None,
+        help="Skip align; load timed lines JSON (keeps words for --punch-mode rhythm)",
+    )
     rp.set_defaults(func=_cmd_render)
 
+
+    # clean-lyrics
+    cl = sub.add_parser("clean-lyrics", help="Strip [Section] tags and English production notes")
+    cl.add_argument("--in", dest="in_path", required=True, help="Raw lyrics text")
+    cl.add_argument("--out", required=True, help="Cleaned lyrics output")
+    cl.set_defaults(func=_cmd_clean_lyrics)
 
     # serve (web UI)
     sv = sub.add_parser("serve", help="Run local web UI (FastAPI)")
@@ -201,6 +240,8 @@ def main(argv: list[str] | None = None) -> None:
     # align needs audio or srt
     if args.command == "align" and not args.srt and not args.audio:
         parser.error("align requires --audio and/or --srt")
+    if args.command == "render" and not args.aligned and not args.lyrics:
+        parser.error("render requires --lyrics (or --aligned)")
     code = args.func(args)
     raise SystemExit(code)
 

@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional, Tuple
 
 from ..align import expected_line_dur, parse_srt
-from ..split import split_line
+from ..split import clean_lyrics_text, split_line
 
 LyricsKind = Literal["plain", "srt", "lrc"]
 
@@ -149,7 +149,9 @@ def prepare_aligned_from_lyrics(
         cues = parse_lrc(lyrics_text)
         return timed_cues_to_aligned(cues, max_chars=max_chars), True, kind
 
-    # plain — use library align (writes lyrics to temp file)
+    # plain — strip [Section]/English notes, then Whisper-align
+    cleaned = clean_lyrics_text(lyrics_text)
+    lyrics_text = "\n".join(cleaned) + ("\n" if cleaned else "")
     if not audio:
         raise ValueError("Plain lyrics require audio for Whisper alignment")
     from ..align import align

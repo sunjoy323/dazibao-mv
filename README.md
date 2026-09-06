@@ -83,6 +83,14 @@ pip install -e '.[web,align,dev]'
 
 List builtin styles and short descriptions.
 
+### `dazibao-mv clean-lyrics`
+
+Strip section tags (`[Intro]`, `[Verse 1]`, `[Chorus]`, `[Fade Out]`, …) and bracketed English production notes (`[Slow acoustic guitar…]`). Chinese lyric lines are kept. `load_lyrics_file` / web paste+upload also auto-clean by default.
+
+```bash
+dazibao-mv clean-lyrics --in lyrics_raw.txt --out lyrics.txt
+```
+
 ### `dazibao-mv align`
 
 Align a lyrics text file to timings (SRT or Whisper):
@@ -97,7 +105,7 @@ dazibao-mv align --audio song.mp3 --lyrics lyrics.txt --out aligned.json \
 | Flag | Default | Meaning |
 |------|---------|---------|
 | `--audio` | — | Audio for Whisper when no `--srt` (mp3/wav/webm/…; ffmpeg-readable) |
-| `--lyrics` | required | Plain lyrics text (one line per lyric) |
+| `--lyrics` | required | Plain lyrics text (one line per lyric; section tags auto-stripped on load) |
 | `--out` | required | Output `aligned.json` |
 | `--srt` | — | Skip Whisper; use this SRT |
 | `--max-chars` | `9` | Split long lines for display |
@@ -171,6 +179,8 @@ Each style YAML defines `verse` / `chorus` / `hook` RGBA, `font`, `hook_keywords
 | `--max-chars` | `9` | Max chars per display line |
 | `--lead` | `0.12` | Early punch; clamped so clips never overlap |
 | `--gap-mode` | `auto` | `auto` (style default), `hold`, `black`/`cut`, or `flash` |
+| `--punch-mode` | `uniform` | `uniform` (default even reveal) or `rhythm` (Whisper word starts + per-chunk intensity 0.7–1.4) |
+| `--aligned` | — | Skip align; load timed JSON (keeps `words` for rhythm mode) |
 | `--lite` | off | Also write `*-lite.mp4` (~1600k video) |
 | `--width` / `--height` / `--fps` | `1080` / `1920` / `24` | Output geometry |
 | `--whisper-model` | `medium` | Used when no `--srt` |
@@ -238,6 +248,8 @@ Stop with `Ctrl+C` or `docker compose down`.
 - Line clips in the ffmpeg concat **never overlap** (`t0 = max(prev_t1, start - LEAD)`).  
 - Layout index cycles **separately** for chorus/hook vs verse.  
 - Kinetic reveal uses `glyph_chunks` (per-char / 1–2 glyph pairs), not whole sentences; `REVEAL_FRAC=0.48`, `MAX_PER_CHAR=0.30`; punch newest only.  
+- Lyrics auto-clean drops `[Section]` tags and English production notes (CLI `clean-lyrics`, `load_lyrics_file`, web upload).  
+- `--punch-mode rhythm` maps chunk reveals to Whisper word timestamps with heavier/lighter punch by syllable length/gap; falls back to uniform per line without words.  
 - Layouts auto-shrink so each full lyric fits one 9:16 frame.  
 - Gaps **hold** the previous lyric/title by default (`--gap-mode hold`); `black` restores solid matte.  
 - Title card (when `--title` is set) lasts until **1s before first lyric**, then **fades** (`--title-fade`, default 0.8s).  

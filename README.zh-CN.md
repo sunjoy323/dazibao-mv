@@ -97,7 +97,7 @@ dazibao-mv align --audio song.mp3 --lyrics lyrics.txt --out aligned.json \
 | 参数 | 默认 | 含义 |
 |------|------|------|
 | `--audio` | — | 无 `--srt` 时用 Whisper（mp3/wav/webm/…，ffmpeg 可读即可） |
-| `--lyrics` | 必需 | 纯文本歌词（一行一句） |
+| `--lyrics` | 必需 | 纯文本歌词（一行一句；加载时自动去掉分段标签） |
 | `--out` | 必需 | 输出 `aligned.json` |
 | `--srt` | — | 跳过 Whisper，使用该 SRT |
 | `--max-chars` | `9` | 过长行拆分上限 |
@@ -171,6 +171,8 @@ dazibao-mv render ... --style-file examples/style_custom.yaml
 | `--max-chars` | `9` | 单屏行字数上限 |
 | `--lead` | `0.12` | 提前轰出；钳制保证片段不重叠 |
 | `--gap-mode` | `auto` | `auto`（跟风格）、`hold`、`black`/`cut`、或 `flash` |
+| `--punch-mode` | `uniform` | `uniform`（默认均匀揭示）或 `rhythm`（按 Whisper 词时间戳 + 音节轻重 0.7–1.4） |
+| `--aligned` | — | 跳过对齐，直接加载 timed JSON（保留 `words` 供 rhythm 模式） |
 | `--lite` | 关 | 额外输出 `*-lite.mp4`（约 1600k 视频） |
 | `--width` / `--height` / `--fps` | `1080` / `1920` / `24` | 输出几何 |
 | `--whisper-model` | `medium` | 无 `--srt` 时使用 |
@@ -254,6 +256,8 @@ docker compose up --build
 - ffmpeg concat 中的行片段**永不重叠**（`t0 = max(prev_t1, start - LEAD)`）。  
 - 副歌/钩子与主歌的布局索引**分别**循环。  
 - 动能揭示用 `glyph_chunks`（单字 / 1–2 字组），不是整句；`REVEAL_FRAC=0.48`，`MAX_PER_CHAR=0.30`；只轰最新一块。  
+- 歌词自动清洗会去掉 `[Section]` 标签与英文制作备注（CLI `clean-lyrics`、`load_lyrics_file`、网页上传）。  
+- `--punch-mode rhythm` 按 Whisper 词时间戳映射字块揭示，并按音节时长/间隙调整冲击强弱；无词时间戳的行回退到 uniform。  
 - 布局自动缩小，保证整句落在单个 9:16 画面内。  
 - 句间间隙默认 **hold** 上一画面（`--gap-mode hold`）；`black` 恢复黑场。  
 - 有 `--title` 时，片头持续到**首句前 1 秒**，再 **fade**（`--title-fade`，默认 0.8s）。  
