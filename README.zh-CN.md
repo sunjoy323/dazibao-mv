@@ -96,7 +96,7 @@ dazibao-mv align --audio song.mp3 --lyrics lyrics.txt --out aligned.json \
 
 | 参数 | 默认 | 含义 |
 |------|------|------|
-| `--audio` | — | 无 `--srt` 时用 Whisper |
+| `--audio` | — | 无 `--srt` 时用 Whisper（mp3/wav/webm/…，ffmpeg 可读即可） |
 | `--lyrics` | 必需 | 纯文本歌词（一行一句） |
 | `--out` | 必需 | 输出 `aligned.json` |
 | `--srt` | — | 跳过 Whisper，使用该 SRT |

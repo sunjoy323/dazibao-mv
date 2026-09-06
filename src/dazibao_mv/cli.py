@@ -126,7 +126,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     # align
     ap = sub.add_parser("align", help="Align lyrics to audio/SRT → JSON")
-    ap.add_argument("--audio", required=False, help="Audio file (for whisper if no --srt)")
+    ap.add_argument("--audio", required=False, help="Audio file for Whisper if no --srt (mp3/wav/webm/…)")
     ap.add_argument("--lyrics", required=True, help="Lyrics text file")
     ap.add_argument("--out", required=True, help="Output aligned.json")
     ap.add_argument("--srt", default=None, help="Skip whisper; use this SRT")
@@ -138,7 +138,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     # render
     rp = sub.add_parser("render", help="Render kinetic dazibao MV")
-    rp.add_argument("--audio", required=True, help="Audio file (mp3/wav/…)")
+    rp.add_argument("--audio", required=True, help="Audio file (mp3/wav/webm/…; anything ffmpeg can read)")
     rp.add_argument("--lyrics", required=True, help="Lyrics text file")
     rp.add_argument("--out", required=True, help="Output mp4 path")
     rp.add_argument("--bg", default=None, help="Background image path")

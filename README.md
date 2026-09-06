@@ -96,7 +96,7 @@ dazibao-mv align --audio song.mp3 --lyrics lyrics.txt --out aligned.json \
 
 | Flag | Default | Meaning |
 |------|---------|---------|
-| `--audio` | — | Audio for Whisper when no `--srt` |
+| `--audio` | — | Audio for Whisper when no `--srt` (mp3/wav/webm/…; ffmpeg-readable) |
 | `--lyrics` | required | Plain lyrics text (one line per lyric) |
 | `--out` | required | Output `aligned.json` |
 | `--srt` | — | Skip Whisper; use this SRT |
