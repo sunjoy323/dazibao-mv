@@ -293,6 +293,219 @@ def redistribute_times(
     return out
 
 
+MIN_TAIL_HOLD = 0.35
+WORD_SPAN_PAD = 0.08
+
+
+def min_piece_duration(text: str, *, min_tail_hold: float = MIN_TAIL_HOLD) -> float:
+    """Minimum display window for a split piece (punch + last-glyph hold)."""
+    n = max(1, len(_normalize(text)))
+    return max(0.55, 0.12 * n + float(min_tail_hold))
+
+
+def _monotonicize_piece_spans(
+    spans: Sequence[Tuple[float, float]],
+    *,
+    min_tail_hold: float = MIN_TAIL_HOLD,
+    word_floor_ends: Optional[Sequence[Optional[float]]] = None,
+) -> List[Tuple[float, float]]:
+    """Ensure piece_i.start >= piece_{i-1}.end without stealing prev tail hold.
+
+    ``word_floor_ends[i]`` — when set — is the last Whisper word end for piece i;
+    collision resolution must never cut that piece below this floor.
+    """
+    if not spans:
+        return []
+    floors = list(word_floor_ends) if word_floor_ends is not None else [None] * len(spans)
+    while len(floors) < len(spans):
+        floors.append(None)
+    out: List[Tuple[float, float]] = []
+    out_floors: List[Optional[float]] = []
+    for i, (s, e) in enumerate(spans):
+        s, e = float(s), float(e)
+        if e <= s:
+            e = s + 0.25
+        floor = floors[i]
+        if floor is not None:
+            e = max(e, float(floor))
+        if i == 0:
+            out.append((s, e))
+            out_floors.append(floor)
+            continue
+        prev_s, prev_e = out[-1]
+        prev_floor = out_floors[-1]
+        if s >= prev_e - 1e-9:
+            out.append((s, e))
+            out_floors.append(floor)
+            continue
+        # Collision: fair midpoint, but never steal last min_tail_hold / word floor.
+        boundary = (prev_e + s) / 2.0
+        min_prev_end = prev_s + float(min_tail_hold)
+        if prev_floor is not None:
+            min_prev_end = max(min_prev_end, float(prev_floor))
+        if boundary < min_prev_end:
+            boundary = min_prev_end
+        if boundary <= prev_s + 0.05:
+            boundary = prev_s + max(0.05, min(float(min_tail_hold), (e - prev_s) * 0.5))
+            if prev_floor is not None:
+                boundary = max(boundary, float(prev_floor))
+        out[-1] = (prev_s, boundary)
+        s = boundary
+        if e < s + 0.05:
+            e = s + 0.05
+        if floor is not None:
+            e = max(e, float(floor))
+        out.append((s, e))
+        out_floors.append(floor)
+    return out
+
+
+def _enforce_min_piece_durations(
+    pieces: Sequence[str],
+    spans: Sequence[Tuple[float, float]],
+    *,
+    parent_end: float,
+    min_tail_hold: float = MIN_TAIL_HOLD,
+    word_floor_ends: Optional[Sequence[Optional[float]]] = None,
+) -> List[Tuple[float, float]]:
+    """Grow short pieces by stealing from followers, then extending parent end."""
+    spans_l: List[Tuple[float, float]] = [(float(s), float(e)) for s, e in spans]
+    n = len(spans_l)
+    for i, piece in enumerate(pieces):
+        need = min_piece_duration(piece, min_tail_hold=min_tail_hold)
+        s, e = spans_l[i]
+        cur = e - s
+        if cur >= need - 1e-9:
+            continue
+        deficit = need - cur
+        # Steal spare duration from following pieces (shrink their start).
+        for j in range(i + 1, n):
+            if deficit <= 1e-9:
+                break
+            js, je = spans_l[j]
+            j_need = min_piece_duration(pieces[j], min_tail_hold=min_tail_hold)
+            spare = (je - js) - j_need
+            if spare <= 1e-9:
+                continue
+            take = min(spare, deficit)
+            e = e + take
+            spans_l[i] = (s, e)
+            spans_l[j] = (js + take, je)
+            deficit -= take
+        if deficit > 1e-9:
+            e = e + deficit
+            spans_l[i] = (s, e)
+            # Push following pieces right to stay monotonic.
+            prev_end = e
+            for j in range(i + 1, n):
+                js, je = spans_l[j]
+                if js < prev_end:
+                    shift = prev_end - js
+                    spans_l[j] = (js + shift, je + shift)
+                prev_end = spans_l[j][1]
+        _ = parent_end
+    return _monotonicize_piece_spans(
+        spans_l, min_tail_hold=min_tail_hold, word_floor_ends=word_floor_ends
+    )
+
+
+def piece_spans_from_words(
+    pieces: Sequence[str],
+    cue: Dict[str, Any],
+    *,
+    parent_start: float,
+    parent_end: float,
+    min_tail_hold: float = MIN_TAIL_HOLD,
+    word_pad: float = WORD_SPAN_PAD,
+) -> Optional[List[Tuple[float, float]]]:
+    """Word-aware [start,end] per split piece; None → fall back to redistribute_times.
+
+    Uses ``words_for_lyric`` without clamping to char-weight bounds first, so
+    piece boundaries track Whisper word times (not character-weight slices).
+    Pieces without a word match are placed *after* the previous piece (never
+    redistributed over the same window — that overlaps and swallows glyphs).
+    """
+    if not pieces:
+        return None
+    if not (cue.get("words") or []):
+        return None
+
+    matched: List[Optional[List[Dict[str, Any]]]] = []
+    any_match = False
+    for piece in pieces:
+        pw = words_for_lyric(piece, cue)  # no t0/t1 clamp
+        if pw:
+            any_match = True
+            matched.append(pw)
+        else:
+            matched.append(None)
+    if not any_match:
+        return None
+
+    n = len(pieces)
+    raw_spans: List[Optional[Tuple[float, float]]] = [None] * n
+    word_floors: List[Optional[float]] = [None] * n
+    for i, pw in enumerate(matched):
+        if not pw:
+            continue
+        st = float(pw[0]["start"])
+        we = float(pw[-1]["end"])
+        en = we + float(word_pad)
+        if en <= st:
+            en = st + 0.25
+        raw_spans[i] = (st, en)
+        word_floors[i] = we
+
+    # Fill wordless pieces after the previous span (not char-weight overlap).
+    for i in range(n):
+        if raw_spans[i] is not None:
+            continue
+        if i > 0 and raw_spans[i - 1] is not None:
+            prev_end = raw_spans[i - 1][1]
+        else:
+            prev_end = float(parent_start)
+        need = min_piece_duration(pieces[i], min_tail_hold=min_tail_hold)
+        st = prev_end
+        # Prefer landing before the next word-anchored start when there is room.
+        next_s: Optional[float] = None
+        for j in range(i + 1, n):
+            if raw_spans[j] is not None:
+                next_s = raw_spans[j][0]
+                break
+        en = st + need
+        if next_s is not None and next_s > st + 0.05:
+            if next_s - st >= need:
+                en = st + need
+            else:
+                # Gap too small: take the gap; min-duration pass will extend/push.
+                en = next_s
+        elif next_s is None:
+            en = max(en, float(parent_end) if parent_end > st else en)
+        raw_spans[i] = (st, max(en, st + 0.05))
+
+    spans = [(float(s), float(e)) for s, e in raw_spans]  # type: ignore[misc]
+    spans = _monotonicize_piece_spans(
+        spans, min_tail_hold=min_tail_hold, word_floor_ends=word_floors
+    )
+    spans = _enforce_min_piece_durations(
+        pieces,
+        spans,
+        parent_end=parent_end,
+        min_tail_hold=min_tail_hold,
+        word_floor_ends=word_floors,
+    )
+    # Honor intro-bleed / remainder parent_start so word stamps cannot
+    # pull the first piece back into instrumental bleed.
+    floored: List[Tuple[float, float]] = []
+    ps = float(parent_start)
+    for s, e in spans:
+        s2 = max(ps, float(s))
+        e2 = max(float(e), s2 + 0.05)
+        floored.append((s2, e2))
+    return _monotonicize_piece_spans(
+        floored, min_tail_hold=min_tail_hold, word_floor_ends=word_floors
+    )
+
 
 def first_lyric_onset_from_words(
     cue: Dict[str, Any],
@@ -689,21 +902,32 @@ def match_lyrics_to_cues(
             cursor = end
 
         pieces = split_line(raw, max_chars=max_chars) or [raw]
-        spans = redistribute_times(start, end, pieces)
-        # Mark pieces from one source lyric so layout anti-repeat can allow a pair
-        split_group = f"src-{len(aligned)}" if len(pieces) > 1 else None
         # Snapshot words from the matched cue (before remainder reuse mutates it)
         src_cue: Dict[str, Any] = {"words": list(matched_cue_words)} if matched_cue_words else {}
+        spans = None
+        if src_cue.get("words"):
+            spans = piece_spans_from_words(
+                pieces, src_cue, parent_start=start, parent_end=end
+            )
+        if spans is None:
+            spans = redistribute_times(start, end, pieces)
+        # Mark pieces from one source lyric so layout anti-repeat can allow a pair
+        split_group = f"src-{len(aligned)}" if len(pieces) > 1 else None
         for piece, (t0, t1) in zip(pieces, spans):
             t0, t1 = cap_span(t0, t1, piece, max_sec=max_line_sec)
             item = {"start": round(t0, 3), "end": round(t1, 3), "text": piece}
             if split_group is not None:
                 item["split_group"] = split_group
             if src_cue.get("words"):
-                pw = words_for_lyric(piece, src_cue, t0=t0, t1=t1)
+                # Prefer char-matched words (no clamp); overlap only as fallback.
+                pw = words_for_lyric(piece, src_cue)
+                if not pw:
+                    pw = words_for_lyric(piece, src_cue, t0=t0, t1=t1)
                 if pw:
                     item["words"] = pw
             aligned.append(item)
+        if aligned:
+            cursor = max(cursor, float(aligned[-1]["end"]))
 
     # ensure monotonic non-decreasing starts
     prev_end = 0.0

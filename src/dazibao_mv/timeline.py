@@ -322,11 +322,56 @@ def assign_style_layouts(lines: Sequence[TimedLine], style: Dict[str, Any]) -> N
         prev_sg = sg
 
 
+MIN_TAIL_HOLD = 0.35
+
+
+def _apply_min_tail_hold(
+    times: Sequence[float],
+    t0: float,
+    t1: float,
+    *,
+    min_tail_hold: float = MIN_TAIL_HOLD,
+) -> List[float]:
+    """Compress chunk starts so the last glyph stays visible ≥ min_tail_hold."""
+    n = len(times)
+    if n == 0:
+        return []
+    t0, t1 = float(t0), float(t1)
+    hold = float(min_tail_hold)
+    limit = t1 - hold
+    if limit <= t0:
+        if n == 1:
+            return [t0]
+        # Window shorter than hold: pack into [t0, t0] (last still at t0).
+        return [t0] * n
+    clamped = [min(t1, max(t0, float(t))) for t in times]
+    if clamped[-1] <= limit + 1e-9:
+        return clamped
+    src0 = clamped[0]
+    src1 = clamped[-1]
+    if src1 <= src0 + 1e-9:
+        out = [min(limit, max(t0, t)) for t in clamped]
+        out[-1] = limit
+        return out
+    out = [src0 + (t - src0) / (src1 - src0) * (limit - src0) for t in clamped]
+    out[-1] = limit
+    # Keep monotonic
+    prev = t0
+    fixed: List[float] = []
+    for t in out:
+        t = min(limit if fixed and len(fixed) == n - 1 else t1, max(prev, t))
+        fixed.append(t)
+        prev = t
+    fixed[-1] = min(fixed[-1], limit)
+    return fixed
+
+
 def assign_chunk_times(
     lines: Sequence[TimedLine],
     *,
     reveal_frac: float = REVEAL_FRAC,
     max_per_char: float = MAX_PER_CHAR,
+    min_tail_hold: float = MIN_TAIL_HOLD,
 ) -> None:
     """Distribute reveal times within each clamped [t0, t1] (uniform)."""
     for L in lines:
@@ -336,9 +381,15 @@ def assign_chunk_times(
             L.chunks = glyph_chunks(L.text) or [L.text]
         n = max(1, len(L.chunks))
         dur = max(0.2, L.t1 - L.t0)
-        reveal_dur = min(dur * reveal_frac, n * max_per_char)
-        reveal_dur = max(reveal_dur, min(dur * 0.35, n * 0.18))
-        L.chunk_times = [L.t0 + reveal_dur * (i / n) for i in range(n)]
+        hold = float(min_tail_hold)
+        # Leave room for last-glyph hold before screen change.
+        usable = max(0.05, dur - hold)
+        reveal_dur = min(dur * reveal_frac, n * max_per_char, usable * (n / max(n - 1, 1)))
+        reveal_dur = max(reveal_dur, min(usable, min(dur * 0.35, n * 0.18)))
+        times = [L.t0 + reveal_dur * (i / n) for i in range(n)]
+        L.chunk_times = _apply_min_tail_hold(
+            times, L.t0, L.t1, min_tail_hold=hold
+        )
 
 
 def _content_words(words: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -464,12 +515,17 @@ def assign_chunk_times_rhythm(
     *,
     reveal_frac: float = REVEAL_FRAC,
     max_per_char: float = MAX_PER_CHAR,
+    min_tail_hold: float = MIN_TAIL_HOLD,
 ) -> None:
     """Map glyph_chunks to Whisper word starts; store per-chunk punch intensity.
 
     Falls back to uniform :func:`assign_chunk_times` per line when no usable
     words are attached. Intensities land in ``TimedLine.extra["chunk_punch"]``
     (floats 0.7–1.4). Absolute reveal times go in ``chunk_times``.
+
+    Ensures the last chunk starts by ``t1 - min_tail_hold`` so the final glyph
+    is not cut off at the screen change. When word ends exceed ``line.end``,
+    slightly extend ``t1`` to match (sync with word-aware align spans).
     """
     from .split import glyph_chunks
 
@@ -477,10 +533,20 @@ def assign_chunk_times_rhythm(
         if not L.chunks:
             L.chunks = glyph_chunks(L.text) or [L.text]
         words = L.extra.get("words") or []
+        content = _content_words(words)
+        if content:
+            last_word_end = max(float(w["end"]) for w in content)
+            if last_word_end > L.end + 0.02:
+                L.end = last_word_end
+            if last_word_end > L.t1 + 0.02:
+                L.t1 = last_word_end
         glyph_starts = _glyph_starts_from_words(L.text, words, t0=L.t0, t1=L.t1)
         if not glyph_starts or len(glyph_starts) < 1:
             assign_chunk_times(
-                [L], reveal_frac=reveal_frac, max_per_char=max_per_char
+                [L],
+                reveal_frac=reveal_frac,
+                max_per_char=max_per_char,
+                min_tail_hold=min_tail_hold,
             )
             L.extra["chunk_punch"] = [1.0] * len(L.chunks)
             L.extra["punch_fallback"] = "uniform"
@@ -523,6 +589,9 @@ def assign_chunk_times_rhythm(
             st = min(L.t1, max(prev, min(L.t1, max(L.t0, st))))
             fixed.append(st)
             prev = st
+        fixed = _apply_min_tail_hold(
+            fixed, L.t0, L.t1, min_tail_hold=min_tail_hold
+        )
         L.chunk_times = fixed
         L.extra["chunk_punch"] = _chunk_punch_intensities(
             fixed, chunk_ends, t1=L.t1
