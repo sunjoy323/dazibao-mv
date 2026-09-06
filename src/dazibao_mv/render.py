@@ -113,30 +113,171 @@ def _require_ffmpeg() -> str:
     return exe
 
 
-def _probe_audio_duration(audio: str) -> float:
+def _finite_duration(value: Any) -> Optional[float]:
+    """Return a positive finite float duration, or None if unusable."""
+    if value is None:
+        return None
+    try:
+        v = float(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(v) or v <= 0:
+        return None
+    return v
+
+
+def _hhmmss_to_seconds(h: int, m: int, s: float) -> float:
+    return h * 3600 + m * 60 + s
+
+
+def _parse_ffmpeg_duration_line(text: str) -> Optional[float]:
+    """Parse ``Duration: HH:MM:SS.xx`` from ffmpeg -i stderr; skip N/A."""
+    import re
+
+    m = re.search(r"Duration:\s*(?:N/A|(\d+):(\d+):(\d+(?:\.\d+)?))", text or "", re.I)
+    if not m or m.group(1) is None:
+        return None
+    return _finite_duration(_hhmmss_to_seconds(int(m.group(1)), int(m.group(2)), float(m.group(3))))
+
+
+def _duration_from_packet_pts(audio: str, pad: float = 0.02) -> Optional[float]:
+    """Last audio packet pts_time/dts_time via ffprobe (Chrome WebM often lacks container duration)."""
     exe = shutil.which("ffprobe") or "ffprobe"
     try:
         out = subprocess.check_output(
             [
-                exe, "-v", "error", "-show_entries", "format=duration",
-                "-of", "default=noprint_wrappers=1:nokey=1", audio,
+                exe,
+                "-v",
+                "error",
+                "-show_entries",
+                "packet=pts_time,dts_time",
+                "-select_streams",
+                "a:0",
+                "-of",
+                "csv=p=0",
+                audio,
             ],
             text=True,
-        ).strip()
-        return float(out)
+            timeout=600,
+        )
     except Exception:
-        # fallback via ffmpeg
+        return None
+    last: Optional[float] = None
+    for line in out.splitlines():
+        for part in line.split(","):
+            part = part.strip()
+            if not part:
+                continue
+            v = _finite_duration(part)
+            if v is not None:
+                last = v
+    if last is None:
+        return None
+    return last + max(0.0, float(pad))
+
+
+def _duration_from_decode(audio: str) -> Optional[float]:
+    """Decode with ffmpeg -f null and parse last ``time=`` progress value."""
+    import re
+
+    exe = shutil.which("ffmpeg") or "ffmpeg"
+    try:
         r = subprocess.run(
-            ["ffmpeg", "-i", audio],
+            [exe, "-hide_banner", "-i", audio, "-f", "null", "-"],
             capture_output=True,
             text=True,
+            timeout=600,
         )
-        import re
-        m = re.search(r"Duration:\s*(\d+):(\d+):(\d+\.\d+)", r.stderr or "")
-        if not m:
-            raise RuntimeError(f"Cannot probe audio duration: {audio}")
-        h, m_, s = int(m.group(1)), int(m.group(2)), float(m.group(3))
-        return h * 3600 + m_ * 60 + s
+    except Exception:
+        return None
+    text = (r.stderr or "") + "\n" + (r.stdout or "")
+    times = re.findall(r"time=(\d+):(\d+):(\d+(?:\.\d+)?)", text)
+    if not times:
+        return None
+    h, m, s = times[-1]
+    return _finite_duration(_hhmmss_to_seconds(int(h), int(m), float(s)))
+
+
+def _probe_audio_duration(audio: str) -> float:
+    """Probe media duration; harden for Chrome WebM with ``Duration: N/A``.
+
+    Order: format duration → stream a:0 duration → ffmpeg -i Duration line →
+    last audio packet pts/dts → full decode ``time=`` progress.
+    """
+    ffprobe = shutil.which("ffprobe") or "ffprobe"
+    ffmpeg = shutil.which("ffmpeg") or "ffmpeg"
+
+    # 1) format=duration
+    try:
+        out = subprocess.check_output(
+            [
+                ffprobe,
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                audio,
+            ],
+            text=True,
+            timeout=120,
+        ).strip()
+        v = _finite_duration(out)
+        if v is not None:
+            return v
+    except Exception:
+        pass
+
+    # 2) stream=duration for a:0
+    try:
+        out = subprocess.check_output(
+            [
+                ffprobe,
+                "-v",
+                "error",
+                "-show_entries",
+                "stream=duration",
+                "-select_streams",
+                "a:0",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                audio,
+            ],
+            text=True,
+            timeout=120,
+        ).strip()
+        v = _finite_duration(out)
+        if v is not None:
+            return v
+    except Exception:
+        pass
+
+    # 3) Parse Duration: HH:MM:SS.xx from ffmpeg -i (skip N/A)
+    try:
+        r = subprocess.run(
+            [ffmpeg, "-i", audio],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        v = _parse_ffmpeg_duration_line(r.stderr or "")
+        if v is not None:
+            return v
+    except Exception:
+        pass
+
+    # 4) last audio packet pts_time / dts_time
+    v = _duration_from_packet_pts(audio)
+    if v is not None:
+        return v
+
+    # 5) decode and parse time= progress
+    v = _duration_from_decode(audio)
+    if v is not None:
+        return v
+
+    raise RuntimeError(f"Cannot probe audio duration: {audio}")
 
 
 def _font(path: str, size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:

@@ -209,7 +209,7 @@ dazibao-mv serve --host 0.0.0.0 --port 8765
 
 ### 使用流程
 
-1. 选择音频（MP3 / WAV / WebM 等；浏览器 `MediaRecorder` 多为 WebM）。  
+1. 选择音频（MP3 / WAV / WebM 等；浏览器 `MediaRecorder` 多为 WebM；容器可能无时长，工具会解码/按 packet 探测）。  
 2. 粘贴歌词，或上传 `.txt` / `.lrc` / `.srt`。  
 3. 选择风格（象牙 / 砖红 / 黑白 / 海报墙 / neon-cyber / blueprint / pop-comic / ink-wash），可选自定义颜色、字体、标题/作者、间隙模式、Whisper 型号、lite、分辨率。  
 4. 提交 → 轮询任务状态 → 预览视频 → 下载 master（及可选 lite）。
