@@ -181,7 +181,7 @@ Each style YAML defines `verse` / `chorus` / `hook` RGBA, `font`, `hook_keywords
 | `--gap-mode` | `auto` | `auto` (style default), `hold`, `black`/`cut`, or `flash` |
 | `--punch-mode` | `uniform` | `uniform` (default even reveal) or `rhythm` (Whisper word starts + per-chunk intensity 0.7–1.4) |
 | `--aligned` | — | Skip align; load timed JSON (keeps `words` for rhythm mode) |
-| `--lite` | off | Also write `*-lite.mp4` (~1600k video) |
+| `--lite` | off | Also write `*-lite.mp4` if smaller (CRF 26, maxrate 800k); skipped when master is already smaller |
 | `--width` / `--height` / `--fps` | `1080` / `1920` / `24` | Output geometry |
 | `--whisper-model` | `medium` | Used when no `--srt` |
 

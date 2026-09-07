@@ -195,7 +195,7 @@ def build_parser() -> argparse.ArgumentParser:
     rp.add_argument("--initial-prompt", default=None, help="Optional ASR prompt")
     rp.add_argument("--max-line-sec", type=float, default=5.5, help="Cap single-line ASR span seconds")
     rp.add_argument("--lead", type=float, default=0.12, help="LEAD early punch (seconds)")
-    rp.add_argument("--lite", action="store_true", help="Also write lite mp4")
+    rp.add_argument("--lite", action="store_true", help="Also write lite mp4 if smaller than master (CRF 26 / maxrate 800k)")
     rp.add_argument("--width", type=int, default=1080)
     rp.add_argument("--height", type=int, default=1920)
     rp.add_argument("--fps", type=int, default=24)

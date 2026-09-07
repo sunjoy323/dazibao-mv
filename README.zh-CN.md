@@ -173,7 +173,7 @@ dazibao-mv render ... --style-file examples/style_custom.yaml
 | `--gap-mode` | `auto` | `auto`（跟风格）、`hold`、`black`/`cut`、或 `flash` |
 | `--punch-mode` | `uniform` | `uniform`（默认均匀揭示）或 `rhythm`（按 Whisper 词时间戳 + 音节轻重 0.7–1.4） |
 | `--aligned` | — | 跳过对齐，直接加载 timed JSON（保留 `words` 供 rhythm 模式） |
-| `--lite` | 关 | 额外输出 `*-lite.mp4`（约 1600k 视频） |
+| `--lite` | 关 | 额外输出更小的 `*-lite.mp4`（CRF 26，maxrate 800k）；若不如 master 小则跳过 |
 | `--width` / `--height` / `--fps` | `1080` / `1920` / `24` | 输出几何 |
 | `--whisper-model` | `medium` | 无 `--srt` 时使用 |
 

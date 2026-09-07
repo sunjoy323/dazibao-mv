@@ -2226,6 +2226,49 @@ def prepare_lines(
     return lines
 
 
+
+# Lite re-encode: CRF + maxrate so simple styles (e.g. poster-wall) stay smaller
+# than master CRF 19, while complex styles stay under ~chat-friendly bitrate.
+LITE_CRF = "26"
+LITE_MAXRATE = "800k"
+LITE_BUFSIZE = "1600k"
+LITE_AUDIO_BITRATE = "96k"
+
+
+def lite_ffmpeg_cmd(src: Path, dst: Path) -> List[str]:
+    """ffmpeg argv for master → lite (quality + bitrate cap)."""
+    return [
+        "ffmpeg", "-y", "-i", str(src),
+        "-c:v", "libx264", "-preset", "fast",
+        "-crf", LITE_CRF, "-maxrate", LITE_MAXRATE, "-bufsize", LITE_BUFSIZE,
+        "-c:a", "aac", "-b:a", LITE_AUDIO_BITRATE, "-movflags", "+faststart",
+        str(dst),
+    ]
+
+
+def _write_lite_mp4(out_path: Path) -> Optional[Path]:
+    """Re-encode a smaller *-lite.mp4; skip (and unlink) if not smaller than master."""
+    lite_path = out_path.with_name(out_path.stem + "-lite" + out_path.suffix)
+    subprocess.run(
+        lite_ffmpeg_cmd(out_path, lite_path),
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    master_size = out_path.stat().st_size
+    lite_size = lite_path.stat().st_size
+    if lite_size >= master_size:
+        lite_path.unlink(missing_ok=True)
+        print(
+            f"lite: skipped (master already small enough: "
+            f"{master_size} bytes; lite would be {lite_size})",
+            flush=True,
+        )
+        return None
+    print(f"lite: {lite_path} ({lite_size} bytes)", flush=True)
+    return lite_path
+
+
 def render_mv(
     *,
     audio: str,
@@ -2430,19 +2473,7 @@ def render_mv(
     )
 
     if lite:
-        lite_path = out_path.with_name(out_path.stem + "-lite" + out_path.suffix)
-        subprocess.run(
-            [
-                "ffmpeg", "-y", "-i", str(out_path),
-                "-c:v", "libx264", "-preset", "fast", "-b:v", "1600k",
-                "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart",
-                str(lite_path),
-            ],
-            check=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        print(f"lite: {lite_path}", flush=True)
+        _write_lite_mp4(out_path)
 
     print(f"DONE {out_path} ({out_path.stat().st_size} bytes)", flush=True)
     return out_path
