@@ -8,7 +8,7 @@
 
 ## 风格小样（30 秒）
 
-同一首歌、纯色底。**8 种内置风格**——各自有**独立动效语言**（布局 + 冲击曲线），不只是换色。逐字 / 双字轰出。仓库内路径可直接打开：
+同一首歌、纯色底。**9 种内置风格**——各自有**独立动效语言**（布局 + 冲击曲线），不只是换色。逐字 / 双字轰出。仓库内路径可直接打开：
 
 | 风格 | 预览图 | 视频 |
 |------|--------|------|
@@ -20,6 +20,7 @@
 | **blueprint** — 制图网格量测显现（标题栏 / 横竖尺） | [preview](examples/samples/preview-blueprint.jpg) | [30s mp4](examples/samples/style-blueprint-30s.mp4) |
 | **pop-comic** — 分镜砸入 / 斜条幅 / 爆裂重击 | [preview](examples/samples/preview-pop-comic.jpg) | [30s mp4](examples/samples/style-pop-comic-30s.mp4) |
 | **ink-wash** — 竖行书法卷轴 + 轻柔放大 / 溶解过渡 | [preview](examples/samples/preview-ink-wash.jpg) | [30s mp4](examples/samples/style-ink-wash-30s.mp4) |
+| **warm-hearth** — 暖奶油底、柔可可字、轻柔 soft-punch（温馨治愈） | — | — |
 
 GitHub 直链（需仓库权限）：
 
@@ -31,6 +32,7 @@ GitHub 直链（需仓库权限）：
 - Comic: https://github.com/sunjoy323/dazibao-mv/blob/main/examples/samples/style-pop-comic-30s.mp4
 - Ink: https://github.com/sunjoy323/dazibao-mv/blob/main/examples/samples/style-ink-wash-30s.mp4
 - poster-wall：样片待补（sample TBD）
+- warm-hearth：样片待补（sample TBD）
 
 ---
 
@@ -148,8 +150,9 @@ dazibao-mv render \
 6. **blueprint** — 制图标题栏 / 横竖尺 / 角标；滑入显现（无弹跳）；低透明度保持  
 7. **pop-comic** — 分镜框 / 斜切条 / 叠层爆裂重击；铺满屏；间隙保持  
 8. **ink-wash** — 竖行书法 / 双栏 / 印章；柔和放大；纸面留白；保持溶解  
+9. **warm-hearth** — 暖奶油画布、柔可可字色、轻柔 soft-punch — 温馨治愈歌词 MV（经典动能，无 slam/故障）  
 
-动效风格（**neon-cyber**、**blueprint**、**pop-comic**、**ink-wash**）在 YAML 中自行声明 `layouts` / `punch` / `gap_mode`。相邻行不复用同一布局（仅当一句歌词被拆分时最多连续 2 次）；绝不连续 3 次相同；句间间隙默认 hold（无黑闪）。
+动效风格（**neon-cyber**、**blueprint**、**pop-comic**、**ink-wash**、**warm-hearth**）在 YAML 中自行声明 `layouts` / `punch` / `gap_mode`。相邻行不复用同一布局（仅当一句歌词被拆分时最多连续 2 次）；绝不连续 3 次相同；句间间隙默认 hold（无黑闪）。
 
 自定义风格：
 

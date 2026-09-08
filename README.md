@@ -8,7 +8,7 @@ Vertical kinetic **dazibao** lyric MV — punchy CJK typography over a poster ba
 
 ## Style demos（30s）
 
-Same song, solid background. **8 builtin styles** — each with a **distinct motion language** (layouts + punch), not just colors. Glyph / digraph punch. Paths in-repo:
+Same song, solid background. **9 builtin styles** — each with a **distinct motion language** (layouts + punch), not just colors. Glyph / digraph punch. Paths in-repo:
 
 | Style | Preview | Video |
 |-------|---------|-------|
@@ -20,6 +20,7 @@ Same song, solid background. **8 builtin styles** — each with a **distinct mot
 | **blueprint** — drafting-grid measured reveal (titleblock / H·V rules) | [preview](examples/samples/preview-blueprint.jpg) | [30s mp4](examples/samples/style-blueprint-30s.mp4) |
 | **pop-comic** — panel-smash / diagonal banner / slam burst | [preview](examples/samples/preview-pop-comic.jpg) | [30s mp4](examples/samples/style-pop-comic-30s.mp4) |
 | **ink-wash** — vertical calligraphy scroll + soft grow / dissolve | [preview](examples/samples/preview-ink-wash.jpg) | [30s mp4](examples/samples/style-ink-wash-30s.mp4) |
+| **warm-hearth** — warm cream canvas, soft cocoa type, gentle soft-punch (cozy healing) | — | — |
 
 GitHub blob links (needs repo access):
 
@@ -31,6 +32,7 @@ GitHub blob links (needs repo access):
 - Comic: https://github.com/sunjoy323/dazibao-mv/blob/main/examples/samples/style-pop-comic-30s.mp4
 - Ink: https://github.com/sunjoy323/dazibao-mv/blob/main/examples/samples/style-ink-wash-30s.mp4
 - poster-wall: sample TBD
+- warm-hearth: sample TBD
 
 ---
 
@@ -156,8 +158,9 @@ See `examples/config.imagegen.yaml` for an image-gen config example.
 6. **blueprint** — drafting titleblock / H·V rules / corner; slide reveal (no bounce); hold at low opacity  
 7. **pop-comic** — comic panel / slash / stack-burst slam; screen-filling; gaps hold  
 8. **ink-wash** — vertical calligraphy / two-col / seal; soft grow; paper margins; hold dissolve  
+9. **warm-hearth** — warm cream canvas, soft cocoa type, gentle soft-punch — cozy healing lyric MV (classic kinetic, no slam/glitch)  
 
-Motion styles (**neon-cyber**, **blueprint**, **pop-comic**, **ink-wash**) declare their own `layouts` / `punch` / `gap_mode` in YAML. Adjacent lines never reuse the same layout (max 2 only when one lyric is split); never 3 identical in a row; mid gaps hold (no black flash by default).
+Motion styles (**neon-cyber**, **blueprint**, **pop-comic**, **ink-wash**, **warm-hearth**) declare their own `layouts` / `punch` / `gap_mode` in YAML. Adjacent lines never reuse the same layout (max 2 only when one lyric is split); never 3 identical in a row; mid gaps hold (no black flash by default).
 
 Custom style file:
 

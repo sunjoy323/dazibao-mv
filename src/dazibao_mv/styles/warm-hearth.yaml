@@ -1,0 +1,38 @@
+name: warm-hearth
+description: Warm cream canvas, soft cocoa type, gentle soft-punch — cozy healing lyric MV
+# classic kinetic mode (no neon/comic/ink special draw path)
+decor: false
+bg: [246, 237, 227]
+shadow_offset: [5, 6]
+font: /usr/share/fonts/opentype/noto/NotoSerifCJK-Bold.ttc
+layouts: [left_stack, top_heavy, center_slam, bottom_banner]
+punch:
+  kind: soft
+  amount: 1.14
+gap_mode: hold
+reveal_frac: 0.62
+max_per_char: 0.38
+title_author_gap: 160
+title:
+  fill: [74, 58, 50]
+  shadow: [196, 150, 120]
+  author_fill: [140, 118, 105]
+  author_shadow: [220, 190, 170]
+  bg: [246, 237, 227]
+verse:
+  fill: [74, 58, 50, 255]
+  shadow: [180, 150, 130, 140]
+  accent: [196, 140, 110, 180]
+  box: [246, 237, 227, 0]
+chorus:
+  fill: [62, 48, 42, 255]
+  shadow: [170, 130, 110, 160]
+  accent: [200, 130, 100, 200]
+  box: [246, 237, 227, 0]
+hook:
+  fill: [168, 92, 72, 255]   # soft terracotta, NOT brick slam
+  shadow: [120, 70, 55, 120]
+  accent: [210, 150, 120, 200]
+  box: [246, 237, 227, 0]
+hook_keywords: []
+chorus_keywords: []
