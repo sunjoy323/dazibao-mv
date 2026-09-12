@@ -146,8 +146,8 @@ def _asr_phrase_parts(text: str) -> List[str]:
     """Split an ASR cue into phrase parts on punctuation and whitespace.
 
     Whisper often emits space-separated CJK clauses without punctuation
-    (e.g. ``八零后的老灯 八零后的老灯``). Splitting those keeps sequential
-    lyric matching from consuming a whole repeated chorus in one step.
+    (e.g. ``八零后的老灯 八零后的老灯``). Always force-split on whitespace so
+    space-split lyrics map 1:1 to ASR halves (Cantonese / Yue-safe).
     """
     text = (text or "").strip()
     if not text:
@@ -158,12 +158,103 @@ def _asr_phrase_parts(text: str) -> List[str]:
         if not punct_part:
             continue
         space_bits = [b.strip() for b in re.split(r"\s+", punct_part) if b.strip()]
-        # Keep short heads (e.g. 「二十岁 想去…」) glued; still split chorus repeats.
-        if len(space_bits) > 1 and all(len(_normalize(b)) >= 4 for b in space_bits):
+        if len(space_bits) > 1:
             parts.extend(space_bits)
         else:
             parts.append(punct_part)
     return parts
+
+
+def _group_words_by_lead_space(words: Sequence[Dict[str, Any]]) -> List[List[Dict[str, Any]]]:
+    """Group Whisper words on leading whitespace (common in Yue ASR)."""
+    groups: List[List[Dict[str, Any]]] = []
+    cur: List[Dict[str, Any]] = []
+    for wi, w in enumerate(words):
+        raw = w.get("word") or ""
+        if wi > 0 and raw[:1].isspace() and cur:
+            groups.append(cur)
+            cur = [w]
+        else:
+            cur.append(w)
+    if cur:
+        groups.append(cur)
+    return groups
+
+
+def force_space_split(cues: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Force-split ASR cues on whitespace into timed half-cues.
+
+    Ported from wudaokou ``retime_half_cues.force_space_split``: when a cue
+    contains spaces, emit one cue per part with word-timestamp boundaries
+    (lead-space groups, char-stream map, or char-weight fallback).
+    """
+    out: List[Dict[str, Any]] = []
+    for c in cues:
+        text = (c.get("text") or "").strip()
+        words = list(c.get("words") or [])
+        parts = [p for p in re.split(r"\s+", text) if p]
+        if len(parts) <= 1:
+            item: Dict[str, Any] = {
+                "start": float(c["start"]),
+                "end": float(c["end"]),
+                "text": text,
+            }
+            if words:
+                item["words"] = words
+            out.append(item)
+            continue
+        groups = _group_words_by_lead_space(words) if words else []
+        if words and len(groups) == len(parts):
+            for part, gw in zip(parts, groups):
+                out.append(
+                    {
+                        "start": float(gw[0]["start"]),
+                        "end": float(gw[-1]["end"]),
+                        "text": part,
+                        "words": gw,
+                    }
+                )
+            continue
+        if words:
+            stream: List[Tuple[str, Dict[str, Any]]] = []
+            for w in words:
+                for ch in _normalize(w.get("word") or ""):
+                    stream.append((ch, w))
+            wi = 0
+            for part in parts:
+                need = list(_normalize(part))
+                matched: List[Dict[str, Any]] = []
+                for _ in need:
+                    if wi >= len(stream):
+                        break
+                    matched.append(stream[wi][1])
+                    wi += 1
+                if not matched:
+                    continue
+                uniq: List[Dict[str, Any]] = []
+                for w in matched:
+                    if not uniq or uniq[-1] is not w:
+                        uniq.append(w)
+                out.append(
+                    {
+                        "start": float(uniq[0]["start"]),
+                        "end": float(uniq[-1]["end"]),
+                        "text": part,
+                        "words": uniq,
+                    }
+                )
+            continue
+        weights = [max(1, len(_normalize(p))) for p in parts]
+        total = sum(weights) or 1
+        t = float(c["start"])
+        end = float(c["end"])
+        dur = max(0.25, end - t)
+        for i, (part, w) in enumerate(zip(parts, weights)):
+            slice_dur = dur * (w / total)
+            t1 = end if i == len(parts) - 1 else t + slice_dur
+            out.append({"start": t, "end": t1, "text": part})
+            t = t1
+    return out
 
 
 _WORD_PUNCT = re.compile(f"[{_PUNCT_CLASS}]+")
@@ -240,17 +331,19 @@ def _split_cue_by_words(cue: Dict[str, Any], parts: Sequence[str]) -> Optional[L
 
 
 def split_asr_cues(cues: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Split long ASR segments on punctuation/whitespace.
+    """Split long ASR segments on whitespace then punctuation.
 
-    When word timestamps exist, break on ``，。！？、；`` (and comma in word text)
-    using real word boundaries so merged verse cues become separate timed phrases.
-    Otherwise fall back to character-weight redistribution.
+    1. ``force_space_split`` — always break space-separated clauses into
+       half-cues (lead-space word groups when available).
+    2. Punctuation splits on the resulting halves via word boundaries or
+       character-weight redistribution.
     """
     out: List[Dict[str, Any]] = []
-    for c in cues:
+    for c in force_space_split(cues):
         text = (c.get("text") or "").strip()
         start, end = float(c["start"]), float(c["end"])
-        parts = _asr_phrase_parts(text)
+        # Spaces already handled; only punct-split here.
+        parts = [p.strip() for p in _PUNCT_SPLIT.split(text) if p.strip()]
         if len(parts) <= 1:
             item = {"start": start, "end": end, "text": text}
             if c.get("words"):
@@ -1031,6 +1124,44 @@ def _finalize_aligned_word_anchors(aligned: List[Dict[str, Any]]) -> None:
             cur["end"] = round(float(cur["start"]) + 0.25, 3)
 
 
+def _half_cue_spans_for_pieces(
+    pieces: Sequence[str],
+    cues: Sequence[Dict[str, Any]],
+    start_j: int,
+) -> Optional[List[Tuple[float, float]]]:
+    """Map lyric pieces 1:1 onto consecutive space-split half-cues.
+
+    When ``words_for_lyric`` fails (garbled Yue ASR), using redistribute +
+    min-hold over a *single* parent window lets the first piece eat the next
+    phrase's onset. Half-cue starts are treated as onsets so min-hold only
+    extends ends into gaps.
+    """
+    n = len(pieces)
+    if n <= 1 or start_j < 0 or start_j + n > len(cues):
+        return None
+    window = cues[start_j : start_j + n]
+    sims = [
+        _cue_similarity(_normalize(pieces[i]), window[i].get("text") or "")
+        for i in range(n)
+    ]
+    ok = (sum(sims) / n >= 0.28 and min(sims) >= 0.12) or (
+        sims[0] >= 0.40 and min(sims) >= 0.10
+    )
+    if not ok:
+        return None
+    spans = [(float(c["start"]), float(c["end"])) for c in window]
+    onsets = [s for s, _ in spans]
+    floors = [e for _, e in spans]
+    return _enforce_min_piece_durations(
+        pieces,
+        spans,
+        parent_end=spans[-1][1],
+        multi_piece=True,
+        word_onset_starts=onsets,
+        word_floor_ends=floors,
+    )
+
+
 def match_lyrics_to_cues(
     lyrics: Sequence[str],
     cues: Sequence[Dict[str, Any]],
@@ -1135,77 +1266,132 @@ def match_lyrics_to_cues(
             if strong_j is not None:
                 best_j, best_r = strong_j, strong_r
 
+        pieces = split_line(raw, max_chars=max_chars) or [raw]
         matched_cue_words: List[Dict[str, Any]] = []
+        half_mapped = False
+        piece_words: List[Optional[List[Dict[str, Any]]]] = [None] * len(pieces)
+        spans: Optional[List[Tuple[float, float]]] = None
+        peeked = 0
+
         if best_j is not None and best_r >= 0.32:
-            cue = cues[best_j]
-            orig_end = float(cue["end"])
-            # Capture words before remainder reuse mutates the cue
-            matched_cue_words = list(cue.get("words") or [])
-            sub = lyric_subspan_from_words(raw, cue)
-            if sub is not None:
-                start, end = sub
-                # Honor intro-bleed onset if first-lyric path raised cue start.
-                cue_st = float(cue["start"])
-                if cue_st > start + 0.15:
-                    start = cue_st
-            else:
-                start = float(cue["start"])
-                end = orig_end
-                start, end = cap_span(start, end, raw, max_sec=max_line_sec, anchor=anchor)
-            # If this cue still has an unmatched trailing phrase, keep it at
-            # best_j for the next lyric (remainder reuse) instead of advancing.
-            rem = _cue_remainder_after_lyric(cue, raw, end)
-            if rem is not None:
-                cues[best_j] = rem
-                ai = best_j
-            else:
-                ai = best_j + 1
-            cursor = end
+            # Prefer 1:1 half-cue mapping for space-split lyric pieces before
+            # remainder reuse mutates the cue list.
+            if len(pieces) > 1:
+                half_spans = _half_cue_spans_for_pieces(pieces, cues, best_j)
+                if half_spans is not None:
+                    spans = half_spans
+                    half_mapped = True
+                    window = cues[best_j : best_j + len(pieces)]
+                    piece_words = [
+                        list(w.get("words") or []) or None for w in window
+                    ]
+                    # Normalize empty lists to None
+                    piece_words = [pw if pw else None for pw in piece_words]
+                    start = float(spans[0][0])
+                    end = float(spans[-1][1])
+                    ai = best_j + len(pieces)
+                    cursor = end
+
+            if not half_mapped:
+                cue = cues[best_j]
+                orig_end = float(cue["end"])
+                # Capture words before remainder reuse mutates the cue
+                matched_cue_words = list(cue.get("words") or [])
+                sub = lyric_subspan_from_words(raw, cue)
+                if sub is not None:
+                    start, end = sub
+                    # Honor intro-bleed onset if first-lyric path raised cue start.
+                    cue_st = float(cue["start"])
+                    if cue_st > start + 0.15:
+                        start = cue_st
+                else:
+                    start = float(cue["start"])
+                    end = orig_end
+                    # Short half-cue without usable words: keep cue start/end
+                    # directly (do not inflate with a long-line cap that steals
+                    # the next half's onset via later min-hold).
+                    cue_dur = orig_end - float(cue["start"])
+                    if len(pieces) == 1 and cue_dur <= expected_line_dur(raw, max_sec=max_line_sec) + 0.8:
+                        start, end = float(cue["start"]), orig_end
+                    else:
+                        start, end = cap_span(
+                            start, end, raw, max_sec=max_line_sec, anchor=anchor
+                        )
+                # If this cue still has an unmatched trailing phrase, keep it at
+                # best_j for the next lyric (remainder reuse) instead of advancing.
+                rem = _cue_remainder_after_lyric(cue, raw, end)
+                if rem is not None:
+                    cues[best_j] = rem
+                    ai = best_j
+                else:
+                    ai = best_j + 1
+                cursor = end
         else:
             start = cursor
             end = cursor + expected_line_dur(raw, max_sec=max_line_sec)
             cursor = end
 
-        pieces = split_line(raw, max_chars=max_chars) or [raw]
-        # Snapshot words from the matched cue (before remainder reuse mutates it)
-        matched_words = list(matched_cue_words)
-        # When split_asr_cues broke a space-separated verse, trailing pieces may
-        # live on the *next* cue — peek one cue ahead and merge word pools.
-        peeked = 0
-        if len(pieces) > 1 and ai < len(cues):
-            need_more = True
-            # Heuristic: if matched words cannot cover later pieces, peek.
-            trial = _sequential_piece_words(pieces, matched_words) if matched_words else [None] * len(pieces)
-            if any(pw is None for pw in trial[1:]):
-                nxt = cues[ai]
-                matched_words = matched_words + list(nxt.get("words") or [])
-                peeked = 1
-        src_cue: Dict[str, Any] = {"words": matched_words} if matched_words else {}
-        piece_words: List[Optional[List[Dict[str, Any]]]] = (
-            _sequential_piece_words(pieces, src_cue["words"])
-            if src_cue.get("words")
-            else [None] * len(pieces)
-        )
-        spans = None
-        if src_cue.get("words"):
-            spans = piece_spans_from_words(
-                pieces, src_cue, parent_start=start, parent_end=end
+        if not half_mapped:
+            # Snapshot words from the matched cue (before remainder reuse mutates it)
+            matched_words = list(matched_cue_words)
+            # When split_asr_cues broke a space-separated verse, trailing pieces may
+            # live on the *next* cue — peek one cue ahead and merge word pools.
+            if len(pieces) > 1 and ai < len(cues):
+                # Heuristic: if matched words cannot cover later pieces, peek.
+                trial = (
+                    _sequential_piece_words(pieces, matched_words)
+                    if matched_words
+                    else [None] * len(pieces)
+                )
+                if any(pw is None for pw in trial[1:]):
+                    nxt = cues[ai]
+                    matched_words = matched_words + list(nxt.get("words") or [])
+                    peeked = 1
+            src_cue: Dict[str, Any] = {"words": matched_words} if matched_words else {}
+            piece_words = (
+                _sequential_piece_words(pieces, src_cue["words"])
+                if src_cue.get("words")
+                else [None] * len(pieces)
             )
-        if spans is None:
-            spans = redistribute_times(start, end, pieces)
-        if len(pieces) > 1:
-            floors = [float(pw[-1]["end"]) if pw else None for pw in piece_words]
-            onsets = [float(pw[0]["start"]) if pw else None for pw in piece_words]
-            spans = _enforce_min_piece_durations(
-                pieces,
-                spans,
-                parent_end=end,
-                multi_piece=True,
-                word_floor_ends=floors,
-                word_onset_starts=onsets,
-            )
-        if peeked and piece_words and piece_words[-1] is not None:
-            ai += peeked
+            spans = None
+            if src_cue.get("words"):
+                spans = piece_spans_from_words(
+                    pieces, src_cue, parent_start=start, parent_end=end
+                )
+            # If words failed but consecutive halves exist at ai-peek window,
+            # try half mapping from the matched index again using live cues.
+            if spans is None and len(pieces) > 1 and best_j is not None and best_r >= 0.32:
+                # best_j may now hold a remainder — prefer pre-advance index.
+                retry_j = best_j if ai == best_j else (ai - 1 if ai > 0 else best_j)
+                # Use original consecutive cues only when not remainder-mutated.
+                if ai == best_j + 1 or ai == best_j + len(pieces):
+                    retry_j = best_j
+                half_spans = _half_cue_spans_for_pieces(pieces, cues, retry_j)
+                if half_spans is not None:
+                    spans = half_spans
+                    half_mapped = True
+                    window = cues[retry_j : retry_j + len(pieces)]
+                    piece_words = [list(w.get("words") or []) or None for w in window]
+                    piece_words = [pw if pw else None for pw in piece_words]
+                    ai = retry_j + len(pieces)
+                    peeked = 0
+            if spans is None:
+                spans = redistribute_times(start, end, pieces)
+            if len(pieces) > 1 and not half_mapped:
+                floors = [float(pw[-1]["end"]) if pw else None for pw in piece_words]
+                onsets = [float(pw[0]["start"]) if pw else None for pw in piece_words]
+                # Wordless pieces sitting on known half-cues: pin onset to cue
+                # start when the piece was placed only by redistribute.
+                spans = _enforce_min_piece_durations(
+                    pieces,
+                    spans,
+                    parent_end=end,
+                    multi_piece=True,
+                    word_floor_ends=floors,
+                    word_onset_starts=onsets,
+                )
+            if peeked and piece_words and piece_words[-1] is not None:
+                ai += peeked
         split_group = f"src-{len(aligned)}" if len(pieces) > 1 else None
         for pi, (piece, (t0, t1)) in enumerate(zip(pieces, spans)):
             pw = piece_words[pi] if pi < len(piece_words) else None
@@ -1240,16 +1426,28 @@ def match_lyrics_to_cues(
     return aligned
 
 
+def _normalize_whisper_language(language: Optional[str]) -> str:
+    lang = (language or "zh").strip().lower()
+    if lang in ("cantonese", "yue"):
+        return "yue"
+    return lang or "zh"
+
+
 def whisper_transcribe(
     audio: str,
     model_size: str = "medium",
     *,
     initial_prompt: Optional[str] = None,
+    language: str = "zh",
 ) -> List[Dict[str, Any]]:
     """Run faster-whisper and return segment cues.
 
     Uses vad_filter=False so choruses / soft passages are less likely to be
     dropped or merged into multi-sentence blobs.
+
+    For Cantonese (``language="yue"`` / ``"cantonese"``), disables
+    ``condition_on_previous_text`` and, when supported, sets
+    ``hallucination_silence_threshold=2.0``.
     """
     try:
         from faster_whisper import WhisperModel
@@ -1259,17 +1457,26 @@ def whisper_transcribe(
             "Install with: pip install 'dazibao-mv[align]'"
         ) from e
 
+    lang = _normalize_whisper_language(language)
     model = WhisperModel(model_size, device="cpu", compute_type="int8")
     kwargs: Dict[str, Any] = {
-        "language": "zh",
+        "language": lang,
         "vad_filter": False,
         "word_timestamps": True,
         "beam_size": 5,
         "condition_on_previous_text": True,
     }
+    if lang == "yue":
+        kwargs["condition_on_previous_text"] = False
+        kwargs["hallucination_silence_threshold"] = 2.0
     if initial_prompt:
         kwargs["initial_prompt"] = initial_prompt
-    segments, _info = model.transcribe(audio, **kwargs)
+    try:
+        segments, _info = model.transcribe(audio, **kwargs)
+    except TypeError:
+        # Older faster-whisper without hallucination_silence_threshold
+        kwargs.pop("hallucination_silence_threshold", None)
+        segments, _info = model.transcribe(audio, **kwargs)
     cues: List[Dict[str, Any]] = []
     for seg in segments:
         text = (seg.text or "").strip()
@@ -1303,6 +1510,7 @@ def align(
     whisper_model: str = "medium",
     initial_prompt: Optional[str] = None,
     max_line_sec: float = 5.5,
+    language: str = "zh",
 ) -> List[Dict[str, Any]]:
     """Align lyrics file to audio/SRT timing."""
     lyrics = load_lyrics_file(lyrics_path)
@@ -1312,7 +1520,12 @@ def align(
         prompt = initial_prompt
         if not prompt and lyrics:
             prompt = "。".join(lyrics[:4])[:120]
-        cues = whisper_transcribe(audio, model_size=whisper_model, initial_prompt=prompt)
+        cues = whisper_transcribe(
+            audio,
+            model_size=whisper_model,
+            initial_prompt=prompt,
+            language=language,
+        )
     else:
         raise ValueError("Either --srt or --audio is required for alignment")
     return match_lyrics_to_cues(

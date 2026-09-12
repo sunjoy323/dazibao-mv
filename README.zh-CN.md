@@ -94,6 +94,8 @@ dazibao-mv align --audio song.mp3 --lyrics lyrics.txt --out aligned.json
 dazibao-mv align --lyrics lyrics.txt --srt song.srt --out aligned.json
 dazibao-mv align --audio song.mp3 --lyrics lyrics.txt --out aligned.json \
   --whisper-model medium --initial-prompt '歌名 作者' --max-line-sec 5.5
+# 粤语 ASR：
+dazibao-mv align --audio song.mp3 --lyrics lyrics.txt --out aligned.json --language yue
 ```
 
 | 参数 | 默认 | 含义 |
@@ -106,11 +108,13 @@ dazibao-mv align --audio song.mp3 --lyrics lyrics.txt --out aligned.json \
 | `--whisper-model` | `medium` | faster-whisper 型号 |
 | `--initial-prompt` | 自动 | 可选 ASR 提示词 |
 | `--max-line-sec` | `5.5` | 单行 ASR 时长软上限 |
+| `--language` | `zh` | Whisper 语言；粤语用 `yue` |
 
 说明：
 
 - 同时写出 `aligned.json` 与同名 `.srt`，方便之后用 `--srt` 复现。  
 - Whisper 默认：`medium`、**关闭 VAD**、开启词级时间戳。  
+- **粤语：** `--language yue`（关闭 `condition_on_previous_text`；若支持则设 `hallucination_silence_threshold=2.0`）。  
 - 首句特殊处理：在前奏区搜强匹配；过长前奏渗血会做末端锚定 / 词起点修正。
 
 ### `dazibao-mv render`
@@ -179,6 +183,7 @@ dazibao-mv render ... --style-file examples/style_custom.yaml
 | `--lite` | 关 | 额外输出更小的 `*-lite.mp4`（CRF 26，maxrate 800k）；若不如 master 小则跳过 |
 | `--width` / `--height` / `--fps` | `1080` / `1920` / `24` | 输出几何 |
 | `--whisper-model` | `medium` | 无 `--srt` 时使用 |
+| `--language` | `zh` | 无 `--srt` 时的 Whisper 语言（粤语用 `yue`） |
 
 #### poster-wall / `mode: poster_fill`
 

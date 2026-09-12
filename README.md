@@ -102,6 +102,8 @@ dazibao-mv align --audio song.mp3 --lyrics lyrics.txt --out aligned.json
 dazibao-mv align --lyrics lyrics.txt --srt song.srt --out aligned.json
 dazibao-mv align --audio song.mp3 --lyrics lyrics.txt --out aligned.json \
   --whisper-model medium --initial-prompt '歌名 作者' --max-line-sec 5.5
+# Cantonese / Yue ASR:
+dazibao-mv align --audio song.mp3 --lyrics lyrics.txt --out aligned.json --language yue
 ```
 
 | Flag | Default | Meaning |
@@ -114,11 +116,13 @@ dazibao-mv align --audio song.mp3 --lyrics lyrics.txt --out aligned.json \
 | `--whisper-model` | `medium` | faster-whisper size |
 | `--initial-prompt` | auto | Optional ASR prompt |
 | `--max-line-sec` | `5.5` | Cap single-line ASR span |
+| `--language` | `zh` | Whisper language; use `yue` for Cantonese |
 
 Notes:
 
 - Writes `aligned.json` **and** a sibling `.srt` for reproducible `--srt` renders.
 - Whisper defaults: model `medium`, **VAD off**, word timestamps on.
+- **Cantonese:** `--language yue` (disables `condition_on_previous_text`; sets `hallucination_silence_threshold=2.0` when supported).
 - First lyric: search early ASR cues; overlong intro bleed is end-anchored / word-onset corrected.
 
 ### `dazibao-mv render`
@@ -187,6 +191,7 @@ Each style YAML defines `verse` / `chorus` / `hook` RGBA, `font`, `hook_keywords
 | `--lite` | off | Also write `*-lite.mp4` if smaller (CRF 26, maxrate 800k); skipped when master is already smaller |
 | `--width` / `--height` / `--fps` | `1080` / `1920` / `24` | Output geometry |
 | `--whisper-model` | `medium` | Used when no `--srt` |
+| `--language` | `zh` | Whisper language when no `--srt` (`yue` for Cantonese) |
 
 ---
 

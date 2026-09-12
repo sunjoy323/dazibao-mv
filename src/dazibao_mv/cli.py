@@ -35,6 +35,7 @@ def _cmd_align(args: argparse.Namespace) -> int:
         whisper_model=args.whisper_model,
         initial_prompt=args.initial_prompt,
         max_line_sec=args.max_line_sec,
+        language=getattr(args, "language", "zh"),
     )
     save_aligned(aligned, args.out)
     srt_out = Path(args.out).with_suffix(".srt")
@@ -63,6 +64,7 @@ def _cmd_render(args: argparse.Namespace) -> int:
             whisper_model=getattr(args, "whisper_model", "medium"),
             initial_prompt=getattr(args, "initial_prompt", None),
             max_line_sec=getattr(args, "max_line_sec", 5.5),
+            language=getattr(args, "language", "zh"),
         )
         # cache aligned next to out
         cache = out_path.with_suffix(".aligned.json")
@@ -156,6 +158,11 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--whisper-model", default="medium", help="faster-whisper model size")
     ap.add_argument("--initial-prompt", default=None, help="Optional ASR prompt (song title/hooks)")
     ap.add_argument("--max-line-sec", type=float, default=5.5, help="Cap single-line ASR span seconds")
+    ap.add_argument(
+        "--language",
+        default="zh",
+        help="Whisper language code (default zh; use yue for Cantonese)",
+    )
     ap.set_defaults(func=_cmd_align)
 
     # render
@@ -194,6 +201,11 @@ def build_parser() -> argparse.ArgumentParser:
     rp.add_argument("--whisper-model", default="medium", help="faster-whisper model when no --srt")
     rp.add_argument("--initial-prompt", default=None, help="Optional ASR prompt")
     rp.add_argument("--max-line-sec", type=float, default=5.5, help="Cap single-line ASR span seconds")
+    rp.add_argument(
+        "--language",
+        default="zh",
+        help="Whisper language code when no --srt (default zh; use yue for Cantonese)",
+    )
     rp.add_argument("--lead", type=float, default=0.12, help="LEAD early punch (seconds)")
     rp.add_argument("--lite", action="store_true", help="Also write lite mp4 if smaller than master (CRF 26 / maxrate 800k)")
     rp.add_argument("--width", type=int, default=1080)
