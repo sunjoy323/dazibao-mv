@@ -152,3 +152,39 @@ def test_piece0_when_second_half_words_missing():
     assert aligned[0]["end"] >= 16.88 - 1e-6
     assert aligned[1]["start"] >= aligned[0]["end"] - 1e-6
     assert aligned[1]["end"] - aligned[1]["start"] >= 0.55 - 1e-6
+
+
+def test_space_split_multi_piece_min_hold():
+    """Space-split pair: first phrase holds ≥1.8s (multi-piece floor)."""
+    words = [
+        {"word": "谈", "start": 10.0, "end": 10.4},
+        {"word": "论", "start": 10.4, "end": 10.7},
+        {"word": "千", "start": 10.7, "end": 11.0},
+        {"word": "秋", "start": 11.0, "end": 11.3},
+        {"word": "谈", "start": 11.3, "end": 11.6},
+        {"word": "论", "start": 11.6, "end": 11.9},
+        {"word": "前", "start": 11.9, "end": 12.2},
+        {"word": "朝", "start": 12.2, "end": 12.5},
+        {"word": "风", "start": 12.5, "end": 12.8},
+        {"word": "雅", "start": 12.8, "end": 13.2},
+    ]
+    cue = {
+        "start": 10.0,
+        "end": 13.2,
+        "text": "谈论千秋 谈论前朝风雅",
+        "words": words,
+    }
+    aligned = match_lyrics_to_cues(
+        ["谈论千秋 谈论前朝风雅"], [cue], max_chars=14
+    )
+    assert [a["text"] for a in aligned[:2]] == ["谈论千秋", "谈论前朝风雅"], aligned
+    first, second = aligned[0], aligned[1]
+    assert first["end"] - first["start"] >= 1.8 - 1e-6, first
+    assert second["end"] - second["start"] >= 1.8 - 1e-6, second
+    assert first["end"] >= 11.3 - 1e-6  # holds through last word of 秋
+    assert second["start"] >= first["end"] - 1e-6
+
+
+def test_min_piece_duration_multi_piece_floor():
+    assert min_piece_duration("谈论千秋", multi_piece=True) >= 1.8
+    assert min_piece_duration("路旁") < 1.8

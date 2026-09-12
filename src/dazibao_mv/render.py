@@ -25,6 +25,7 @@ from .styles import (
 from .timeline import (
     LAYOUTS,
     POSTER_LAYOUTS,
+    POSTER_BOOM_4,
     TimedLine,
     assign_chunk_times,
     assign_chunk_times_rhythm,
@@ -730,7 +731,7 @@ def draw_layout(
     mode = _style_mode(style)
     # Mode / poster decor under text
     if decor and palette is not None and mode in ("", "poster_fill"):
-        with_stars = (line_index % 3 == 2) or layout == "poster_fill_v"
+        with_stars = (line_index % 3 == 2) or layout in ("poster_fill_v", POSTER_BOOM_4, "poster_boom_4")
         draw_poster_decor(
             draw, overlay, W, H, palette,
             line_index=line_index,
@@ -766,7 +767,7 @@ def draw_layout(
     nchar = max(1, len(shown.replace(" ", "")))
     sc_all = size_scale_for(nchar)
     shadow_off = tuple(style.get("shadow_offset") or (18, 18))
-    use_hard = palette is not None or layout.startswith("poster_fill")
+    use_hard = palette is not None or layout.startswith("poster_")
     # Smash bars: keep classic dark bars only when style box has opacity
     # (new modes set box alpha 0 — avoid muddy rectangles on colored bgs).
     bar_fallback = box_c if (len(box_c) > 3 and box_c[3] == 0) or mode in (
@@ -880,6 +881,53 @@ def draw_layout(
             f_set = _font(font_path, base_size)
             bb_set = draw.textbbox((0, 0), ch, font=f_set)
             y += (bb_set[3] - bb_set[1]) + gap
+
+    elif layout in (POSTER_BOOM_4, "poster_boom_4"):
+        # Full-bleed 2×2 轰字 smash for exactly 4 CJK chars (削肉成纸 / 活雀断翅).
+        # Larger than normal H fill: each glyph owns a quadrant with hard shadow.
+        full_glyphs = [c for c in (full_text or shown) if c.strip()][:4]
+        while len(full_glyphs) < 4:
+            full_glyphs.append("　")
+        vis_glyphs = [c for c in shown if c.strip()][:4]
+        margin_x = int(W * 0.045)
+        margin_y = int(H * 0.055)
+        gap_x = int(W * 0.025)
+        gap_y = int(H * 0.02)
+        ox, oy = shadow_off
+        cell_w = (W - 2 * margin_x - gap_x - ox) // 2
+        cell_h = (H - 2 * margin_y - gap_y - oy) // 2
+        # Fit one representative glyph to the cell — heavy dazibao smash size.
+        probe = full_glyphs[0] if full_glyphs[0].strip() else "字"
+        lo, hi = 80, int(min(cell_w, cell_h) * 1.05)
+        base_size = lo
+        while lo <= hi:
+            mid = (lo + hi) // 2
+            f = _font(font_path, mid)
+            bb = draw.textbbox((0, 0), probe, font=f)
+            tw, th = bb[2] - bb[0], bb[3] - bb[1]
+            if tw <= int(cell_w * 0.92) and th <= int(cell_h * 0.92):
+                base_size = mid
+                lo = mid + 2
+            else:
+                hi = mid - 2
+        slots = [
+            (margin_x, margin_y),
+            (margin_x + cell_w + gap_x, margin_y),
+            (margin_x, margin_y + cell_h + gap_y),
+            (margin_x + cell_w + gap_x, margin_y + cell_h + gap_y),
+        ]
+        # Boost punch on newest glyph for heavier smash than H fill.
+        boom_punch = punch * 1.18 if punch > 1.0 else punch
+        for i, ch in enumerate(vis_glyphs):
+            sc = boom_punch if i == len(vis_glyphs) - 1 else 1.0
+            f = _font(font_path, max(40, int(base_size * sc)))
+            bb = draw.textbbox((0, 0), ch, font=f)
+            tw, th = bb[2] - bb[0], bb[3] - bb[1]
+            sx, sy = slots[i]
+            x = sx + (cell_w - tw - ox) // 2
+            y = sy + (cell_h - th - oy) // 2 - bb[1]
+            put_text(draw, (x, y), ch, f, is_new=(i == len(vis_glyphs) - 1))
+
 
     elif layout == "giant_char":
         ch = chunks_visible[-1]

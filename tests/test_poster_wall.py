@@ -42,22 +42,73 @@ def test_palette_cycle_different_bg():
 def test_assign_poster_layouts_by_length():
     lines = [
         TimedLine(text="节拍", start=0, end=1),           # 2 → H
-        TimedLine(text="要写成墙", start=1, end=2),         # 4 → H
+        TimedLine(text="要写成墙", start=1, end=2),         # 4 → boom
         TimedLine(text="越热闹越寂寞", start=2, end=3),     # 6 → H
         TimedLine(text="霓虹把黑夜照得太红", start=3, end=4),  # 9 → V
-        TimedLine(text="笑声失控", start=4, end=5),         # 4 → mid alt
+        TimedLine(text="笑声失控", start=4, end=5),         # 4 → boom
     ]
     assign_poster_layouts(lines)
     assert lines[0].layout == "poster_fill_h"
-    assert lines[1].layout == "poster_fill_h"
-    # third short would make 3×H — flip to V
-    assert lines[2].layout == "poster_fill_v"
+    assert lines[1].layout == "poster_boom_4"
+    assert lines[2].layout == "poster_fill_h"
     assert lines[3].layout == "poster_fill_v"
-    assert lines[4].layout in ("poster_fill_h", "poster_fill_v")
+    assert lines[4].layout == "poster_boom_4"
     # never 3 identical
     lays = [L.layout for L in lines]
     for i in range(len(lays) - 2):
         assert not (lays[i] == lays[i + 1] == lays[i + 2])
+
+
+def test_four_char_gets_boom_layout():
+    lines = [
+        TimedLine(text="削肉成纸", start=0, end=1),
+        TimedLine(text="活雀断翅", start=1, end=2),
+    ]
+    assign_poster_layouts(lines)
+    assert lines[0].layout == "poster_boom_4"
+    assert lines[1].layout == "poster_boom_4"
+
+
+def test_draw_layout_boom_4_smoke():
+    style = load_style("poster-wall")
+    W, H = 1080, 1920
+    bg = Image.new("RGB", (W, H), (10, 10, 10))
+    pal = palette_for(style, 0)
+    im = draw_layout(
+        bg,
+        ["削", "肉", "成", "纸"],
+        "削肉成纸",
+        "poster_boom_4",
+        t_local=1.0,
+        style=style,
+        width=W,
+        height=H,
+        palette=pal,
+        line_index=0,
+        decor=True,
+    )
+    assert im.size == (W, H)
+    px = im.load()
+    bg_c = pal["bg"]
+    # Expect ink in all four quadrants
+    samples = [
+        (W // 4, H // 4),
+        (3 * W // 4, H // 4),
+        (W // 4, 3 * H // 4),
+        (3 * W // 4, 3 * H // 4),
+    ]
+    hits = 0
+    for cx, cy in samples:
+        for dx in range(-40, 41, 8):
+            for dy in range(-40, 41, 8):
+                x, y = cx + dx, cy + dy
+                if 0 <= x < W and 0 <= y < H and px[x, y][:3] != bg_c:
+                    hits += 1
+                    break
+            else:
+                continue
+            break
+    assert hits >= 3, f"boom 2x2 expected ink in most quadrants, hits={hits}"
 
 
 def test_font_fit_short_string_fills_width():

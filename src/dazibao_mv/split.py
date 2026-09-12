@@ -1,4 +1,4 @@
-"""Split lyric lines by punctuation and jieba, with orphan merge."""
+"""Split lyric lines by spaces, punctuation and jieba, with orphan merge."""
 
 from __future__ import annotations
 
@@ -9,6 +9,8 @@ import jieba
 
 # Sentence / clause break punctuation (kept out of output pieces)
 _PUNCT_SPLIT = re.compile(r"[，,。.!！？?；;、：:\n\r…—\-]+")
+# Intentional phrase breaks in lyrics (ASCII / fullwidth Ideographic space)
+_SPACE_SPLIT = re.compile(r"[ \u3000]+")
 
 
 def _clean(text: str) -> str:
@@ -71,23 +73,34 @@ def _merge_orphans(chunks: List[str], max_chars: int) -> List[str]:
 def split_line(text: str, max_chars: int = 9) -> List[str]:
     """Split one lyric line into display pieces.
 
-    1. Split on punctuation.
-    2. Further chunk long pieces with jieba / max_chars.
-    3. Merge orphans ≤2 chars when combined length ≤ max_chars+1.
+    1. First split on ASCII space / fullwidth Ideographic space (\u3000) /
+       multiple whitespace — spaces are intentional phrase breaks and must
+       not be glued across (e.g. ``谈论千秋 谈论前朝风雅`` → two screens).
+    2. For each phrase: split on punctuation, then jieba / max_chars.
+    3. Only ``_clean`` (strip spaces) *inside* a phrase after the space-split.
+    4. Merge orphans ≤2 chars when combined length ≤ max_chars+1, per phrase
+       (never across a space boundary).
     """
     text = (text or "").strip()
     if not text:
         return []
 
-    parts = [p for p in _PUNCT_SPLIT.split(text) if _clean(p)]
-    if not parts:
-        parts = [_clean(text)] if _clean(text) else []
+    phrases = [p for p in _SPACE_SPLIT.split(text) if p.strip()]
+    if not phrases:
+        return []
 
     chunks: List[str] = []
-    for part in parts:
-        chunks.extend(_jieba_chunks(part, max_chars))
-
-    return _merge_orphans(chunks, max_chars)
+    for phrase in phrases:
+        parts = [p for p in _PUNCT_SPLIT.split(phrase) if _clean(p)]
+        if not parts:
+            cleaned = _clean(phrase)
+            if cleaned:
+                parts = [cleaned]
+        phrase_chunks: List[str] = []
+        for part in parts:
+            phrase_chunks.extend(_jieba_chunks(part, max_chars))
+        chunks.extend(_merge_orphans(phrase_chunks, max_chars))
+    return chunks
 
 
 def split_lyrics(lines: List[str], max_chars: int = 9) -> List[str]:

@@ -295,12 +295,31 @@ def redistribute_times(
 
 MIN_TAIL_HOLD = 0.35
 WORD_SPAN_PAD = 0.08
+# Stronger floor for multi-piece split_group (space / punct splits)
+MIN_SPLIT_PIECE_HOLD = 1.8
 
 
-def min_piece_duration(text: str, *, min_tail_hold: float = MIN_TAIL_HOLD) -> float:
-    """Minimum display window for a split piece (punch + last-glyph hold)."""
+def min_piece_duration(
+    text: str,
+    *,
+    min_tail_hold: float = MIN_TAIL_HOLD,
+    multi_piece: bool = False,
+    n_pieces: int = 1,
+) -> float:
+    """Minimum display window for a split piece (punch + last-glyph hold).
+
+    When ``multi_piece`` and the source lyric only yielded a small split_group
+    (typical space-split pair, ``n_pieces`` ≤ 2), enforce ≥1.8s so the first
+    phrase holds through its sung span. Longer jieba/punct splits keep the
+    classic formula so word-anchored middles (e.g. 路旁) stay put.
+    """
     n = max(1, len(_normalize(text)))
-    return max(0.55, 0.12 * n + float(min_tail_hold))
+    base = max(0.55, 0.12 * n + float(min_tail_hold))
+    if multi_piece and int(n_pieces) <= 2:
+        # Proportional weight with a hard floor for 2-screen splits
+        weighted = 0.22 * n + 0.90
+        return max(base, float(MIN_SPLIT_PIECE_HOLD), weighted)
+    return base
 
 
 def _monotonicize_piece_spans(
@@ -367,12 +386,16 @@ def _enforce_min_piece_durations(
     parent_end: float,
     min_tail_hold: float = MIN_TAIL_HOLD,
     word_floor_ends: Optional[Sequence[Optional[float]]] = None,
+    multi_piece: bool = False,
 ) -> List[Tuple[float, float]]:
     """Grow short pieces by stealing from followers, then extending parent end."""
     spans_l: List[Tuple[float, float]] = [(float(s), float(e)) for s, e in spans]
     n = len(spans_l)
+    mp = bool(multi_piece) or n > 1
     for i, piece in enumerate(pieces):
-        need = min_piece_duration(piece, min_tail_hold=min_tail_hold)
+        need = min_piece_duration(
+            piece, min_tail_hold=min_tail_hold, multi_piece=mp, n_pieces=n
+        )
         s, e = spans_l[i]
         cur = e - s
         if cur >= need - 1e-9:
@@ -383,7 +406,9 @@ def _enforce_min_piece_durations(
             if deficit <= 1e-9:
                 break
             js, je = spans_l[j]
-            j_need = min_piece_duration(pieces[j], min_tail_hold=min_tail_hold)
+            j_need = min_piece_duration(
+                pieces[j], min_tail_hold=min_tail_hold, multi_piece=mp, n_pieces=n
+            )
             spare = (je - js) - j_need
             if spare <= 1e-9:
                 continue
@@ -464,7 +489,12 @@ def piece_spans_from_words(
             prev_end = raw_spans[i - 1][1]
         else:
             prev_end = float(parent_start)
-        need = min_piece_duration(pieces[i], min_tail_hold=min_tail_hold)
+        need = min_piece_duration(
+            pieces[i],
+            min_tail_hold=min_tail_hold,
+            multi_piece=(n > 1),
+            n_pieces=n,
+        )
         st = prev_end
         # Prefer landing before the next word-anchored start when there is room.
         next_s: Optional[float] = None
@@ -493,6 +523,7 @@ def piece_spans_from_words(
         parent_end=parent_end,
         min_tail_hold=min_tail_hold,
         word_floor_ends=word_floors,
+        multi_piece=(n > 1),
     )
     # Honor intro-bleed / remainder parent_start so word stamps cannot
     # pull the first piece back into instrumental bleed.
@@ -911,6 +942,14 @@ def match_lyrics_to_cues(
             )
         if spans is None:
             spans = redistribute_times(start, end, pieces)
+        if len(pieces) > 1:
+            # Stronger min hold for space/punct split groups (esp. first phrase).
+            spans = _enforce_min_piece_durations(
+                pieces,
+                spans,
+                parent_end=end,
+                multi_piece=True,
+            )
         # Mark pieces from one source lyric so layout anti-repeat can allow a pair
         split_group = f"src-{len(aligned)}" if len(pieces) > 1 else None
         for piece, (t0, t1) in zip(pieces, spans):

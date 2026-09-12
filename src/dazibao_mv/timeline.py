@@ -52,6 +52,10 @@ POSTER_LAYOUTS = [
     "poster_fill_v",
 ]
 
+# Full-bleed 2×2 smash for exact 4-CJK-char lines (削肉成纸 / 活雀断翅)
+POSTER_BOOM_4 = "poster_boom_4"
+ALL_POSTER_LAYOUTS = POSTER_LAYOUTS + [POSTER_BOOM_4]
+
 # Per-mode layout pools (used when style.layouts is unset)
 NEON_LAYOUTS = [
     "neon_col_left",
@@ -161,16 +165,19 @@ def assign_layouts(
 
 
 def assign_poster_layouts(lines: Sequence[TimedLine]) -> None:
-    """Screen-fill poster layouts: short→H, long→V, mid alternate H/V.
+    """Screen-fill poster layouts: 4→boom, short→H, long→V, mid alternate H/V.
 
-    Never allow 3 identical layouts in a row (flip H↔V to break a run).
+    Exact 4-CJK-char lines prefer ``poster_boom_4`` (2×2 轰字 smash).
+    Never allow 3 identical layouts in a row (flip among boom/H/V to break a run).
     """
     prev: Optional[str] = None
     run = 0
     alt = 0
     for L in lines:
         nchar = len(L.text.replace(" ", "").replace("　", ""))
-        if nchar <= 6:
+        if nchar == 4:
+            cand = POSTER_BOOM_4
+        elif nchar <= 6:
             cand = "poster_fill_h"
         elif nchar >= 9:
             cand = "poster_fill_v"
@@ -178,7 +185,14 @@ def assign_poster_layouts(lines: Sequence[TimedLine]) -> None:
             cand = POSTER_LAYOUTS[alt % 2]
             alt += 1
         if prev is not None and cand == prev and run >= 2:
-            cand = "poster_fill_v" if cand == "poster_fill_h" else "poster_fill_h"
+            # Break triple run; keep boom preference when possible by flipping
+            # non-boom lines, or boom→H when three booms would stack.
+            if cand == POSTER_BOOM_4:
+                cand = "poster_fill_h"
+            elif cand == "poster_fill_h":
+                cand = "poster_fill_v"
+            else:
+                cand = "poster_fill_h"
         if cand == prev:
             run += 1
         else:

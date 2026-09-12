@@ -49,3 +49,15 @@ def test_split_lyrics_skips_blank_and_comment():
 def test_empty():
     assert split_line("") == []
     assert split_line("   ") == []
+
+
+def test_space_split_two_phrases():
+    assert split_line("谈论千秋 谈论前朝风雅", max_chars=14) == ["谈论千秋", "谈论前朝风雅"]
+
+
+def test_fullwidth_space_split():
+    assert split_line("谈论千秋\u3000谈论前朝风雅", max_chars=14) == ["谈论千秋", "谈论前朝风雅"]
+
+
+def test_four_char_alone():
+    assert split_line("削肉成纸", max_chars=14) == ["削肉成纸"]

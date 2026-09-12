@@ -192,7 +192,8 @@ palettes:
   - {bg: [196,30,58], fill: [242,237,228], shadow: [17,17,17], ...}
 ```
 
-- 布局：`poster_fill_h`（短句）/ `poster_fill_v`（长句），中等长度轮换。  
+- 布局：`poster_fill_h`（短句）/ `poster_fill_v`（长句），中等长度轮换；**恰好 4 个汉字**用 `poster_boom_4`（2×2 轰字铺满）。  
+- 歌词里的空格 / 全角空格是**故意的分屏断句**（如 `谈论千秋 谈论前朝风雅` → 两屏），对齐后各自计时。  
 - 每句用 `palettes[i % n]` 作纯色底，再画装饰与硬阴影大字（约占画面 88–94%）。  
 - 片头使用色板 B（米色纸）+ 同套装饰与淡出。
 
@@ -264,7 +265,7 @@ docker compose up --build
 - 布局自动缩小，保证整句落在单个 9:16 画面内。  
 - 句间间隙默认 **hold** 上一画面（`--gap-mode hold`）；`black` 恢复黑场。  
 - 有 `--title` 时，片头持续到**首句前 1 秒**，再 **fade**（`--title-fade`，默认 0.8s）。  
-- **poster-wall** / `poster_fill`：交替纯色底 + 硬块阴影 + 铺满布局（`poster_fill_h` / `poster_fill_v`）。  
+- **poster-wall** / `poster_fill`：交替纯色底 + 硬块阴影 + 铺满布局（`poster_fill_h` / `poster_fill_v` / 四字 `poster_boom_4`）；歌词空格分屏。  
 - 内置动效风格（**neon-cyber**、**blueprint**、**pop-comic**、**ink-wash**）各自使用私有布局池 + 冲击曲线；防重复分配（除非 `split_group`，否则相邻不复用同一布局；绝不连续 3 次相同）。  
 - 上述风格默认 `--gap-mode hold`（曲中无黑场）；CLI 仍可强制 `black`/`flash`。  
 - Neon / blueprint / comic 追求约 90%+ 铺满屏；ink-wash 保留更平静的纸面留白。

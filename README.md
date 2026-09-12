@@ -153,7 +153,7 @@ See `examples/config.imagegen.yaml` for an image-gen config example.
 1. **dazibao-ivory** — ivory type, teal-gray shadow, crimson hook smash  
 2. **laodeng-brick** — warm gold type, brick-red smash  
 3. **mono-poster** — stark B/W; white bars / inverted hook  
-4. **poster-wall** — poster-fill: glyphs auto-fit the screen, hard block shadow, decor + stamp「大字报」, **alternating solid palettes** per line. `--bg*` flags are ignored.  
+4. **poster-wall** — poster-fill: glyphs auto-fit the screen, hard block shadow, decor + stamp「大字报」, **alternating solid palettes** per line. Exact **4 CJK chars** use `poster_boom_4` (2×2 smash). Spaces in lyrics are intentional screen breaks. `--bg*` flags are ignored.  
 5. **neon-cyber** — edge neon columns / glitch punch; screen-filling; gaps hold previous line  
 6. **blueprint** — drafting titleblock / H·V rules / corner; slide reveal (no bounce); hold at low opacity  
 7. **pop-comic** — comic panel / slash / stack-burst slam; screen-filling; gaps hold  
@@ -256,7 +256,7 @@ Stop with `Ctrl+C` or `docker compose down`.
 - Layouts auto-shrink so each full lyric fits one 9:16 frame.  
 - Gaps **hold** the previous lyric/title by default (`--gap-mode hold`); `black` restores solid matte.  
 - Title card (when `--title` is set) lasts until **1s before first lyric**, then **fades** (`--title-fade`, default 0.8s).  
-- `poster_fill` / **poster-wall**: alternating solid palette backgrounds; hard block shadows; screen-fill layouts (`poster_fill_h` / `poster_fill_v`).  
+- `poster_fill` / **poster-wall**: alternating solid palette backgrounds; hard block shadows; screen-fill layouts (`poster_fill_h` / `poster_fill_v` / 4-char `poster_boom_4`); lyric spaces split screens.  
 - Builtin motion styles (**neon-cyber**, **blueprint**, **pop-comic**, **ink-wash**) each use a private layout pool + punch curve; anti-repeat assignment (no consecutive same layout unless `split_group`; never 3 in a row).  
 - Those styles default to `--gap-mode hold` (no mid-song black); CLI can still force `black`/`flash`.  
 - Neon / blueprint / comic aim ~90%+ screen fill; ink-wash keeps calmer paper margins.
