@@ -936,10 +936,22 @@ def words_for_lyric(
 
 
 def _word_display_onset(words: Sequence[Dict[str, Any]]) -> float:
-    """Sung onset for display: skip Whisper intro-bleed leading words when present."""
+    """Sung onset for display: skip Whisper intro-bleed leading words when present.
+
+    Only apply bleed-skip for longer word runs (intro blobs). Short split pieces
+    (e.g. 谈论千秋 with 2 matched tokens) must keep word0.start — otherwise a
+    slightly long first syllable is misread as bleed and the screen starts late.
+    """
     onset = float(words[0]["start"])
+    content = [
+        w
+        for w in words
+        if (w.get("word") or "").strip() and not _WORD_PUNCT.fullmatch((w.get("word") or "").strip())
+    ]
+    if len(content) < 4:
+        return onset
     skipped = first_lyric_onset_from_words({"start": onset, "words": list(words)})
-    if skipped is not None and skipped >= onset - 1e-9:
+    if skipped is not None and skipped >= onset + 0.25:
         return float(skipped)
     return onset
 
