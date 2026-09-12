@@ -92,6 +92,8 @@ MODE_LAYOUTS = {
 
 REVEAL_FRAC = 0.48
 MAX_PER_CHAR = 0.30
+# Scale/slam punch decay finishes by ~0.08–0.14s; clamp last glyph before singing ends.
+PUNCH_COMPLETE_SEC = 0.12
 
 
 def clamp_timeline(
@@ -345,14 +347,26 @@ def _apply_min_tail_hold(
     t1: float,
     *,
     min_tail_hold: float = MIN_TAIL_HOLD,
+    singing_end: Optional[float] = None,
+    punch_complete: float = PUNCH_COMPLETE_SEC,
 ) -> List[float]:
-    """Compress chunk starts so the last glyph stays visible ≥ min_tail_hold."""
+    """Compress chunk starts so last glyph holds and finishes punch before singing ends.
+
+    ``singing_end`` (last Whisper word end when known) caps the last punch so
+    kinetic reveal completes at/before the sung phrase ends — not merely by
+    screen ``t1`` (which may hold into the following gap).
+    """
     n = len(times)
     if n == 0:
         return []
     t0, t1 = float(t0), float(t1)
     hold = float(min_tail_hold)
+    # Last chunk must start early enough for: tail hold AND punch complete.
     limit = t1 - hold
+    if singing_end is not None:
+        punch_limit = float(singing_end) - float(punch_complete)
+        limit = min(limit, punch_limit)
+    limit = min(limit, t1)
     if limit <= t0:
         if n == 1:
             return [t0]
@@ -387,7 +401,11 @@ def assign_chunk_times(
     max_per_char: float = MAX_PER_CHAR,
     min_tail_hold: float = MIN_TAIL_HOLD,
 ) -> None:
-    """Distribute reveal times within each clamped [t0, t1] (uniform)."""
+    """Distribute reveal times within each clamped [t0, t1] (uniform).
+
+    Clamps so the last glyph punch finishes by ``line.end`` and, when Whisper
+    words exist, by the last word end (singing end).
+    """
     for L in lines:
         if not L.chunks:
             from .split import glyph_chunks
@@ -401,8 +419,17 @@ def assign_chunk_times(
         reveal_dur = min(dur * reveal_frac, n * max_per_char, usable * (n / max(n - 1, 1)))
         reveal_dur = max(reveal_dur, min(usable, min(dur * 0.35, n * 0.18)))
         times = [L.t0 + reveal_dur * (i / n) for i in range(n)]
+        singing_end = float(L.end)
+        words = L.extra.get("words") or []
+        content = _content_words(words) if words else []
+        if content:
+            singing_end = min(singing_end, max(float(w["end"]) for w in content))
         L.chunk_times = _apply_min_tail_hold(
-            times, L.t0, L.t1, min_tail_hold=hold
+            times,
+            L.t0,
+            L.t1,
+            min_tail_hold=hold,
+            singing_end=singing_end,
         )
 
 
@@ -603,8 +630,15 @@ def assign_chunk_times_rhythm(
             st = min(L.t1, max(prev, min(L.t1, max(L.t0, st))))
             fixed.append(st)
             prev = st
+        singing_end = float(L.end)
+        if content:
+            singing_end = min(singing_end, max(float(w["end"]) for w in content))
         fixed = _apply_min_tail_hold(
-            fixed, L.t0, L.t1, min_tail_hold=min_tail_hold
+            fixed,
+            L.t0,
+            L.t1,
+            min_tail_hold=min_tail_hold,
+            singing_end=singing_end,
         )
         L.chunk_times = fixed
         L.extra["chunk_punch"] = _chunk_punch_intensities(

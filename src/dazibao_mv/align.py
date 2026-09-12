@@ -327,21 +327,33 @@ def _monotonicize_piece_spans(
     *,
     min_tail_hold: float = MIN_TAIL_HOLD,
     word_floor_ends: Optional[Sequence[Optional[float]]] = None,
+    word_onset_starts: Optional[Sequence[Optional[float]]] = None,
 ) -> List[Tuple[float, float]]:
-    """Ensure piece_i.start >= piece_{i-1}.end without stealing prev tail hold.
+    """Ensure piece_i.start >= piece_{i-1}.end without late-shifting word onsets.
 
-    ``word_floor_ends[i]`` — when set — is the last Whisper word end for piece i;
-    collision resolution must never cut that piece below this floor.
+    ``word_floor_ends[i]`` — last Whisper word end for piece i; never cut below.
+    ``word_onset_starts[i]`` — first Whisper word start; when set, piece start
+    stays pinned to that onset (never pushed later past the sung onset).
+    Collision with a word-anchored next piece shortens prev.end (after floor)
+    instead of sliding next.start forward.
     """
     if not spans:
         return []
     floors = list(word_floor_ends) if word_floor_ends is not None else [None] * len(spans)
+    onsets = list(word_onset_starts) if word_onset_starts is not None else [None] * len(spans)
     while len(floors) < len(spans):
         floors.append(None)
+    while len(onsets) < len(spans):
+        onsets.append(None)
     out: List[Tuple[float, float]] = []
     out_floors: List[Optional[float]] = []
+    out_onsets: List[Optional[float]] = []
     for i, (s, e) in enumerate(spans):
         s, e = float(s), float(e)
+        onset = onsets[i]
+        if onset is not None:
+            # Pin start to word onset (never later); tiny early lead kept elsewhere.
+            s = float(onset)
         if e <= s:
             e = s + 0.25
         floor = floors[i]
@@ -350,14 +362,38 @@ def _monotonicize_piece_spans(
         if i == 0:
             out.append((s, e))
             out_floors.append(floor)
+            out_onsets.append(onset)
             continue
         prev_s, prev_e = out[-1]
         prev_floor = out_floors[-1]
         if s >= prev_e - 1e-9:
             out.append((s, e))
             out_floors.append(floor)
+            out_onsets.append(onset)
             continue
-        # Collision: fair midpoint, but never steal last min_tail_hold / word floor.
+        # Collision
+        if onset is not None:
+            # Keep next at word onset; shorten prev hold after last-word floor.
+            min_prev_end = prev_s + 0.05
+            if prev_floor is not None:
+                min_prev_end = max(min_prev_end, float(prev_floor))
+            new_prev_end = min(prev_e, s)
+            if new_prev_end < min_prev_end:
+                # Impossible to both honor floors and non-overlap: keep anchors.
+                new_prev_end = min_prev_end
+            if new_prev_end <= prev_s + 0.05:
+                new_prev_end = prev_s + 0.05
+            out[-1] = (prev_s, new_prev_end)
+            # Do not move s past onset
+            if e < s + 0.05:
+                e = s + 0.05
+            if floor is not None:
+                e = max(e, float(floor))
+            out.append((s, e))
+            out_floors.append(floor)
+            out_onsets.append(onset)
+            continue
+        # No word onset on next: fair midpoint, never steal prev word floor / tail.
         boundary = (prev_e + s) / 2.0
         min_prev_end = prev_s + float(min_tail_hold)
         if prev_floor is not None:
@@ -376,6 +412,7 @@ def _monotonicize_piece_spans(
             e = max(e, float(floor))
         out.append((s, e))
         out_floors.append(floor)
+        out_onsets.append(onset)
     return out
 
 
@@ -386,12 +423,34 @@ def _enforce_min_piece_durations(
     parent_end: float,
     min_tail_hold: float = MIN_TAIL_HOLD,
     word_floor_ends: Optional[Sequence[Optional[float]]] = None,
+    word_onset_starts: Optional[Sequence[Optional[float]]] = None,
     multi_piece: bool = False,
 ) -> List[Tuple[float, float]]:
-    """Grow short pieces by stealing from followers, then extending parent end."""
+    """Grow short pieces by extending end into gaps — never late-shift word onsets.
+
+    Prefer: (1) extend ``end`` into the gap before the next piece, (2) steal
+    spare time by shrinking a following piece from its *end* (not by delaying
+    its start). Only non-word-anchored followers may be slid right. When the
+    next piece has a word onset, stop at that onset even if min-hold is unmet.
+    """
     spans_l: List[Tuple[float, float]] = [(float(s), float(e)) for s, e in spans]
     n = len(spans_l)
     mp = bool(multi_piece) or n > 1
+    floors = list(word_floor_ends) if word_floor_ends is not None else [None] * n
+    onsets = list(word_onset_starts) if word_onset_starts is not None else [None] * n
+    while len(floors) < n:
+        floors.append(None)
+    while len(onsets) < n:
+        onsets.append(None)
+    # Re-pin starts to word onsets before growing ends.
+    for i in range(n):
+        if onsets[i] is not None:
+            s, e = spans_l[i]
+            s2 = float(onsets[i])
+            e2 = max(e, s2 + 0.05)
+            if floors[i] is not None:
+                e2 = max(e2, float(floors[i]))
+            spans_l[i] = (s2, e2)
     for i, piece in enumerate(pieces):
         need = min_piece_duration(
             piece, min_tail_hold=min_tail_hold, multi_piece=mp, n_pieces=n
@@ -401,36 +460,78 @@ def _enforce_min_piece_durations(
         if cur >= need - 1e-9:
             continue
         deficit = need - cur
-        # Steal spare duration from following pieces (shrink their start).
+        # Cap: do not grow past the next word-anchored onset.
+        next_cap: Optional[float] = None
+        if i + 1 < n and onsets[i + 1] is not None:
+            next_cap = float(onsets[i + 1])
+        elif i + 1 < n:
+            next_cap = float(spans_l[i + 1][0])
+        # (1) Extend into the gap before the next piece.
+        if next_cap is not None and next_cap > e:
+            take = min(deficit, next_cap - e)
+            e = e + take
+            spans_l[i] = (s, e)
+            deficit -= take
+        # (2) Steal spare from followers by shrinking their *end* (keep starts).
         for j in range(i + 1, n):
             if deficit <= 1e-9:
+                break
+            if onsets[j] is not None:
+                # Word-anchored follower: cannot claim past its onset.
                 break
             js, je = spans_l[j]
             j_need = min_piece_duration(
                 pieces[j], min_tail_hold=min_tail_hold, multi_piece=mp, n_pieces=n
             )
-            spare = (je - js) - j_need
-            if spare <= 1e-9:
+            j_floor = float(floors[j]) if floors[j] is not None else js + float(min_tail_hold)
+            # Spare above floor / min need, taken from the end.
+            spare_end = je - max(js + j_need, j_floor)
+            if spare_end <= 1e-9:
                 continue
-            take = min(spare, deficit)
+            # Only useful if this follower abuts / is right after our end.
+            if js > e + 1e-9:
+                # Gap already handled; shrinking their end does not help us.
+                continue
+            take = min(spare_end, deficit)
             e = e + take
             spans_l[i] = (s, e)
-            spans_l[j] = (js + take, je)
+            spans_l[j] = (js, je - take)  # shrink from end; start stays
+            # If we now overlap their start, slide non-anchored start to e.
+            if spans_l[j][0] < e:
+                jdur = spans_l[j][1] - spans_l[j][0]
+                spans_l[j] = (e, max(e + max(0.05, jdur), e + 0.05))
             deficit -= take
+        # (3) Still short: extend end; only push non-anchored followers.
         if deficit > 1e-9:
-            e = e + deficit
-            spans_l[i] = (s, e)
-            # Push following pieces right to stay monotonic.
-            prev_end = e
-            for j in range(i + 1, n):
-                js, je = spans_l[j]
-                if js < prev_end:
-                    shift = prev_end - js
-                    spans_l[j] = (js + shift, je + shift)
-                prev_end = spans_l[j][1]
-        _ = parent_end
+            if i + 1 < n and onsets[i + 1] is not None:
+                # Hard stop at next word onset — accept shorter than min hold.
+                e = max(e, min(e + deficit, float(onsets[i + 1])))
+                spans_l[i] = (s, e)
+            else:
+                e = e + deficit
+                # Prefer not past parent_end unless needed for floor.
+                if parent_end and e > float(parent_end) + 1e-9:
+                    # Allow past parent_end for min hold (screen can hold into gap).
+                    pass
+                spans_l[i] = (s, e)
+                prev_end = e
+                for j in range(i + 1, n):
+                    js, je = spans_l[j]
+                    if onsets[j] is not None:
+                        # Stop pushing; clamp our end to their onset if overlapping.
+                        if prev_end > float(onsets[j]):
+                            floor_i = float(floors[i]) if floors[i] is not None else s + 0.05
+                            spans_l[i] = (s, max(floor_i, float(onsets[j])))
+                        break
+                    if js < prev_end:
+                        shift = prev_end - js
+                        spans_l[j] = (js + shift, je + shift)
+                    prev_end = spans_l[j][1]
     return _monotonicize_piece_spans(
-        spans_l, min_tail_hold=min_tail_hold, word_floor_ends=word_floor_ends
+        spans_l,
+        min_tail_hold=min_tail_hold,
+        word_floor_ends=floors,
+        word_onset_starts=onsets,
     )
 
 
@@ -447,21 +548,38 @@ def piece_spans_from_words(
 
     Uses ``words_for_lyric`` without clamping to char-weight bounds first, so
     piece boundaries track Whisper word times (not character-weight slices).
+    Matching is sequential: later pieces search after earlier matches so a
+    repeated head (谈论…) does not re-claim the first clause's words.
     Pieces without a word match are placed *after* the previous piece (never
     redistributed over the same window — that overlaps and swallows glyphs).
+
+    Min-duration growth extends ``end`` into gaps; word-onset starts are never
+    pushed later past the sung onset.
     """
     if not pieces:
         return None
     if not (cue.get("words") or []):
         return None
 
+    # Sequential consume: each match drops its words from the remaining pool.
+    remaining: List[Dict[str, Any]] = [dict(w) for w in (cue.get("words") or [])]
     matched: List[Optional[List[Dict[str, Any]]]] = []
     any_match = False
     for piece in pieces:
-        pw = words_for_lyric(piece, cue)  # no t0/t1 clamp
+        pw = words_for_lyric(piece, {"words": remaining})  # no t0/t1 clamp
         if pw:
             any_match = True
             matched.append(pw)
+            # Drop matched tokens from remaining (by start/end/word identity).
+            drop = {(float(w["start"]), float(w["end"]), (w.get("word") or "").strip()) for w in pw}
+            new_rem: List[Dict[str, Any]] = []
+            for w in remaining:
+                key = (float(w["start"]), float(w["end"]), (w.get("word") or "").strip())
+                if key in drop:
+                    drop.discard(key)
+                    continue
+                new_rem.append(w)
+            remaining = new_rem
         else:
             matched.append(None)
     if not any_match:
@@ -470,6 +588,7 @@ def piece_spans_from_words(
     n = len(pieces)
     raw_spans: List[Optional[Tuple[float, float]]] = [None] * n
     word_floors: List[Optional[float]] = [None] * n
+    word_onsets: List[Optional[float]] = [None] * n
     for i, pw in enumerate(matched):
         if not pw:
             continue
@@ -480,6 +599,11 @@ def piece_spans_from_words(
             en = st + 0.25
         raw_spans[i] = (st, en)
         word_floors[i] = we
+        # Prefer bleed-skipped sung onset for display start.
+        word_onsets[i] = _word_display_onset(pw)
+        # If onset was skipped forward, also raise span start.
+        if word_onsets[i] > st + 0.05:
+            raw_spans[i] = (float(word_onsets[i]), en)
 
     # Fill wordless pieces after the previous span (not char-weight overlap).
     for i in range(n):
@@ -507,7 +631,7 @@ def piece_spans_from_words(
             if next_s - st >= need:
                 en = st + need
             else:
-                # Gap too small: take the gap; min-duration pass will extend/push.
+                # Gap too small: take the gap; min-duration pass extends end only.
                 en = next_s
         elif next_s is None:
             en = max(en, float(parent_end) if parent_end > st else en)
@@ -515,7 +639,10 @@ def piece_spans_from_words(
 
     spans = [(float(s), float(e)) for s, e in raw_spans]  # type: ignore[misc]
     spans = _monotonicize_piece_spans(
-        spans, min_tail_hold=min_tail_hold, word_floor_ends=word_floors
+        spans,
+        min_tail_hold=min_tail_hold,
+        word_floor_ends=word_floors,
+        word_onset_starts=word_onsets,
     )
     spans = _enforce_min_piece_durations(
         pieces,
@@ -523,18 +650,28 @@ def piece_spans_from_words(
         parent_end=parent_end,
         min_tail_hold=min_tail_hold,
         word_floor_ends=word_floors,
+        word_onset_starts=word_onsets,
         multi_piece=(n > 1),
     )
     # Honor intro-bleed / remainder parent_start so word stamps cannot
-    # pull the first piece back into instrumental bleed.
+    # pull the first piece back into instrumental bleed — but never push a
+    # word-onset start *later* than the sung onset (parent_start may lag).
     floored: List[Tuple[float, float]] = []
     ps = float(parent_start)
-    for s, e in spans:
-        s2 = max(ps, float(s))
+    for i, (s, e) in enumerate(spans):
+        if word_onsets[i] is not None:
+            s2 = float(word_onsets[i])
+        else:
+            s2 = max(ps, float(s))
         e2 = max(float(e), s2 + 0.05)
+        if word_floors[i] is not None:
+            e2 = max(e2, float(word_floors[i]) + float(word_pad))
         floored.append((s2, e2))
     return _monotonicize_piece_spans(
-        floored, min_tail_hold=min_tail_hold, word_floor_ends=word_floors
+        floored,
+        min_tail_hold=min_tail_hold,
+        word_floor_ends=word_floors,
+        word_onset_starts=word_onsets,
     )
 
 
@@ -797,6 +934,91 @@ def words_for_lyric(
     return out
 
 
+
+def _word_display_onset(words: Sequence[Dict[str, Any]]) -> float:
+    """Sung onset for display: skip Whisper intro-bleed leading words when present."""
+    onset = float(words[0]["start"])
+    skipped = first_lyric_onset_from_words({"start": onset, "words": list(words)})
+    if skipped is not None and skipped >= onset - 1e-9:
+        return float(skipped)
+    return onset
+
+
+def _sequential_piece_words(
+    pieces: Sequence[str],
+    cue_words: Sequence[Dict[str, Any]],
+) -> List[Optional[List[Dict[str, Any]]]]:
+    """Match each split piece to Whisper words, consuming left-to-right."""
+    rem = [dict(w) for w in cue_words]
+    out: List[Optional[List[Dict[str, Any]]]] = []
+    for piece in pieces:
+        pw = words_for_lyric(piece, {"words": rem})
+        if not pw:
+            out.append(None)
+            continue
+        out.append(pw)
+        drop = {
+            (float(w["start"]), float(w["end"]), (w.get("word") or "").strip())
+            for w in pw
+        }
+        rem = [
+            w
+            for w in rem
+            if (float(w["start"]), float(w["end"]), (w.get("word") or "").strip()) not in drop
+        ]
+    return out
+
+
+def _finalize_aligned_word_anchors(aligned: List[Dict[str, Any]]) -> None:
+    """Pin word-anchored starts; resolve overlaps without late-shifting onsets."""
+    for item in aligned:
+        words = item.get("words") or []
+        if not words:
+            continue
+        onset = _word_display_onset(words)
+        we = float(words[-1]["end"])
+        # Never later than real sung onset; optional ≤0.12s early is OK.
+        st = float(item["start"])
+        if st > onset:
+            st = onset
+        elif onset - st > 0.12:
+            st = onset
+        item["start"] = round(st, 3)
+        item["end"] = round(max(float(item["end"]), we + WORD_SPAN_PAD), 3)
+        if item["end"] <= item["start"]:
+            item["end"] = round(item["start"] + 0.25, 3)
+
+    for i in range(1, len(aligned)):
+        prev, cur = aligned[i - 1], aligned[i]
+        if float(cur["start"]) >= float(prev["end"]) - 1e-9:
+            if float(cur["end"]) <= float(cur["start"]):
+                cur["end"] = round(float(cur["start"]) + 0.25, 3)
+            continue
+        cur_words = cur.get("words") or []
+        prev_words = prev.get("words") or []
+        prev_floor = (
+            float(prev_words[-1]["end"])
+            if prev_words
+            else float(prev["start"]) + MIN_TAIL_HOLD
+        )
+        if cur_words:
+            # Keep cur at word onset; shorten prev after last-word floor.
+            new_prev_end = min(float(prev["end"]), float(cur["start"]))
+            if new_prev_end < prev_floor:
+                new_prev_end = prev_floor
+            if new_prev_end <= float(prev["start"]) + 0.05:
+                new_prev_end = float(prev["start"]) + 0.05
+            prev["end"] = round(new_prev_end, 3)
+            # If still overlapping (floor past cur onset), keep both anchors.
+        else:
+            # No words on cur — may slide start forward to clear prev.
+            shift = float(prev["end"]) - float(cur["start"])
+            cur["start"] = round(float(cur["start"]) + shift, 3)
+            cur["end"] = round(max(float(cur["end"]) + shift, float(cur["start"]) + 0.25), 3)
+        if float(cur["end"]) <= float(cur["start"]):
+            cur["end"] = round(float(cur["start"]) + 0.25, 3)
+
+
 def match_lyrics_to_cues(
     lyrics: Sequence[str],
     cues: Sequence[Dict[str, Any]],
@@ -934,7 +1156,24 @@ def match_lyrics_to_cues(
 
         pieces = split_line(raw, max_chars=max_chars) or [raw]
         # Snapshot words from the matched cue (before remainder reuse mutates it)
-        src_cue: Dict[str, Any] = {"words": list(matched_cue_words)} if matched_cue_words else {}
+        matched_words = list(matched_cue_words)
+        # When split_asr_cues broke a space-separated verse, trailing pieces may
+        # live on the *next* cue — peek one cue ahead and merge word pools.
+        peeked = 0
+        if len(pieces) > 1 and ai < len(cues):
+            need_more = True
+            # Heuristic: if matched words cannot cover later pieces, peek.
+            trial = _sequential_piece_words(pieces, matched_words) if matched_words else [None] * len(pieces)
+            if any(pw is None for pw in trial[1:]):
+                nxt = cues[ai]
+                matched_words = matched_words + list(nxt.get("words") or [])
+                peeked = 1
+        src_cue: Dict[str, Any] = {"words": matched_words} if matched_words else {}
+        piece_words: List[Optional[List[Dict[str, Any]]]] = (
+            _sequential_piece_words(pieces, src_cue["words"])
+            if src_cue.get("words")
+            else [None] * len(pieces)
+        )
         spans = None
         if src_cue.get("words"):
             spans = piece_spans_from_words(
@@ -943,42 +1182,49 @@ def match_lyrics_to_cues(
         if spans is None:
             spans = redistribute_times(start, end, pieces)
         if len(pieces) > 1:
-            # Stronger min hold for space/punct split groups (esp. first phrase).
+            floors = [float(pw[-1]["end"]) if pw else None for pw in piece_words]
+            onsets = [float(pw[0]["start"]) if pw else None for pw in piece_words]
             spans = _enforce_min_piece_durations(
                 pieces,
                 spans,
                 parent_end=end,
                 multi_piece=True,
+                word_floor_ends=floors,
+                word_onset_starts=onsets,
             )
-        # Mark pieces from one source lyric so layout anti-repeat can allow a pair
+        if peeked and piece_words and piece_words[-1] is not None:
+            ai += peeked
         split_group = f"src-{len(aligned)}" if len(pieces) > 1 else None
-        for piece, (t0, t1) in zip(pieces, spans):
+        for pi, (piece, (t0, t1)) in enumerate(zip(pieces, spans)):
+            pw = piece_words[pi] if pi < len(piece_words) else None
+            if pw:
+                onset = _word_display_onset(pw)
+                we = float(pw[-1]["end"])
+                t0 = onset
+                t1 = max(float(t1), we + WORD_SPAN_PAD)
             t0, t1 = cap_span(t0, t1, piece, max_sec=max_line_sec)
-            item = {"start": round(t0, 3), "end": round(t1, 3), "text": piece}
+            if pw:
+                onset = _word_display_onset(pw)
+                if t0 > onset:
+                    t0 = onset
+                we = float(pw[-1]["end"])
+                t1 = max(t1, we + WORD_SPAN_PAD)
+            item: Dict[str, Any] = {
+                "start": round(float(t0), 3),
+                "end": round(float(t1), 3),
+                "text": piece,
+            }
             if split_group is not None:
                 item["split_group"] = split_group
-            if src_cue.get("words"):
-                # Prefer char-matched words (no clamp); overlap only as fallback.
-                pw = words_for_lyric(piece, src_cue)
-                if not pw:
-                    pw = words_for_lyric(piece, src_cue, t0=t0, t1=t1)
-                if pw:
-                    item["words"] = pw
+            if pw:
+                item["words"] = pw
             aligned.append(item)
         if aligned:
             cursor = max(cursor, float(aligned[-1]["end"]))
 
-    # ensure monotonic non-decreasing starts
-    prev_end = 0.0
-    for item in aligned:
-        if item["start"] < prev_end:
-            shift = prev_end - item["start"]
-            item["start"] = round(item["start"] + shift, 3)
-            item["end"] = round(item["end"] + shift, 3)
-        if item["end"] <= item["start"]:
-            item["end"] = round(item["start"] + 0.25, 3)
-        prev_end = item["end"]
 
+    # Monotonic without late-shifting word-anchored starts.
+    _finalize_aligned_word_anchors(aligned)
     return aligned
 
 

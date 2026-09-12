@@ -155,22 +155,22 @@ def test_piece0_when_second_half_words_missing():
 
 
 def test_space_split_multi_piece_min_hold():
-    """Space-split pair: first phrase holds ≥1.8s (multi-piece floor)."""
+    """Space-split pair: starts pinned to word onsets; min-hold extends end into gaps."""
     words = [
         {"word": "谈", "start": 10.0, "end": 10.4},
         {"word": "论", "start": 10.4, "end": 10.7},
         {"word": "千", "start": 10.7, "end": 11.0},
         {"word": "秋", "start": 11.0, "end": 11.3},
-        {"word": "谈", "start": 11.3, "end": 11.6},
-        {"word": "论", "start": 11.6, "end": 11.9},
-        {"word": "前", "start": 11.9, "end": 12.2},
-        {"word": "朝", "start": 12.2, "end": 12.5},
-        {"word": "风", "start": 12.5, "end": 12.8},
-        {"word": "雅", "start": 12.8, "end": 13.2},
+        {"word": "谈", "start": 12.5, "end": 12.8},
+        {"word": "论", "start": 12.8, "end": 13.1},
+        {"word": "前", "start": 13.1, "end": 13.4},
+        {"word": "朝", "start": 13.4, "end": 13.7},
+        {"word": "风", "start": 13.7, "end": 14.0},
+        {"word": "雅", "start": 14.0, "end": 14.4},
     ]
     cue = {
         "start": 10.0,
-        "end": 13.2,
+        "end": 14.4,
         "text": "谈论千秋 谈论前朝风雅",
         "words": words,
     }
@@ -179,10 +179,53 @@ def test_space_split_multi_piece_min_hold():
     )
     assert [a["text"] for a in aligned[:2]] == ["谈论千秋", "谈论前朝风雅"], aligned
     first, second = aligned[0], aligned[1]
+    # Starts pinned to sung onsets — never late-shifted by min-hold.
+    assert abs(first["start"] - 10.0) < 0.05, first
+    assert abs(second["start"] - 12.5) < 0.05, second
+    # Gap before second onset lets first grow to ≥1.8s by extending end.
     assert first["end"] - first["start"] >= 1.8 - 1e-6, first
-    assert second["end"] - second["start"] >= 1.8 - 1e-6, second
     assert first["end"] >= 11.3 - 1e-6  # holds through last word of 秋
-    assert second["start"] >= first["end"] - 1e-6
+    assert first["end"] <= second["start"] + 1e-6
+    assert second["end"] - second["start"] >= 1.8 - 1e-6, second
+
+
+def test_word_onset_not_late_shifted_when_min_hold_tight():
+    """Tight word spans: keep start=word0.start even if min 1.8s cannot be met."""
+    from dazibao_mv.align import _enforce_min_piece_durations
+
+    pieces = ["谈论千秋", "谈论前朝风雅"]
+    spans = [(10.0, 11.3), (11.3, 13.2)]
+    out = _enforce_min_piece_durations(
+        pieces,
+        spans,
+        parent_end=13.2,
+        multi_piece=True,
+        word_floor_ends=[11.3, 13.2],
+        word_onset_starts=[10.0, 11.3],
+    )
+    assert abs(out[0][0] - 10.0) < 1e-9, out
+    assert abs(out[1][0] - 11.3) < 1e-9, out  # not pushed later
+    # End may grow only up to next onset
+    assert out[0][1] <= 11.3 + 1e-9, out
+
+
+def test_min_hold_extends_end_not_start():
+    """With a following gap, min duration grows end while start stays at onset."""
+    from dazibao_mv.align import _enforce_min_piece_durations
+
+    pieces = ["谈论千秋", "谈论前朝风雅"]
+    spans = [(10.0, 11.3), (12.5, 13.5)]
+    out = _enforce_min_piece_durations(
+        pieces,
+        spans,
+        parent_end=14.0,
+        multi_piece=True,
+        word_floor_ends=[11.3, 13.2],
+        word_onset_starts=[10.0, 12.5],
+    )
+    assert abs(out[0][0] - 10.0) < 1e-9, out
+    assert out[0][1] - out[0][0] >= 1.8 - 1e-6, out
+    assert abs(out[1][0] - 12.5) < 1e-9, out
 
 
 def test_min_piece_duration_multi_piece_floor():

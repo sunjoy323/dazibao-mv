@@ -100,3 +100,22 @@ def test_prepare_lines_uniform_default():
     aligned = [{"text": "撞南墙", "start": 1.0, "end": 2.5}]
     lines = prepare_lines(aligned, style, lead=0.0, audio_dur=10.0)
     assert "chunk_punch" not in lines[0].extra or lines[0].extra.get("punch_mode") != "rhythm"
+
+
+def test_last_punch_before_singing_end():
+    """Long line / short window: last glyph punch finishes by last word end."""
+    from dazibao_mv.timeline import PUNCH_COMPLETE_SEC
+
+    words = [
+        {"word": ch, "start": 1.0 + i * 0.08, "end": 1.0 + i * 0.08 + 0.07}
+        for i, ch in enumerate("一二三四五六七八九十")
+    ]
+    # Screen holds past singing, but punch must finish by last word end (~1.79)
+    L = TimedLine(text="一二三四五六七八九十", start=1.0, end=2.5, t0=1.0, t1=2.5)
+    L.chunks = list("一二三四五六七八九十")
+    L.extra["words"] = words
+    assign_chunk_times([L], min_tail_hold=0.35)
+    last_word_end = words[-1]["end"]
+    assert L.chunk_times[-1] + PUNCH_COMPLETE_SEC <= last_word_end + 1e-6, (
+        L.chunk_times[-1], last_word_end
+    )
